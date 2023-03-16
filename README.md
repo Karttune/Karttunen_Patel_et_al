@@ -2,7 +2,7 @@
 
 This is a repository of the source R code for the preprint:
 
-Transposable elements as tissue-specific enhancers in cancers of endodermal lineage
+Transposable elements as tissue-specific enhancers in cancers of endodermal lineage.
 Konsta Karttunen, Divyesh Patel, Jihan Xia, Liangru Fei, Kimmo Palin, Lauri Aaltonen, Biswajyoti Sahu
 bioRxiv 2022.12.16.520732; doi: https://doi.org/10.1101/2022.12.16.520732
 
