@@ -1,4 +1,4 @@
-# Karttunen_Patel_et_al_source_code
+# Karttunen, Patel et al. scripts
 
 This is a repository of the source R code for the preprint:
 
