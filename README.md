@@ -6,11 +6,11 @@ Transposable elements as tissue-specific enhancers in cancers of endodermal line
 Konsta Karttunen, Divyesh Patel, Jihan Xia, Liangru Fei, Kimmo Palin, Lauri Aaltonen, Biswajyoti Sahu
 bioRxiv 2022.12.16.520732; doi: https://doi.org/10.1101/2022.12.16.520732
 
-This is the R code in Rmarkdown reports and associated utility scripts used to create the figures in the manuscript.
-The scripts require the annotation files and preprocessed data as described in the methods.
-All scripts have been tested on R 4.1.2 on Ubuntu 18.04.6 LTS.
+# This is the R code in Rmarkdown reports and associated utility scripts used to create the figures in the manuscript.
+# The scripts require the annotation files and preprocessed data as described in the methods.
+# All scripts have been tested on R 4.1.2 on Ubuntu 18.04.6 LTS.
 
-All scripts require the following R packages:
+# All scripts require the following R packages:
 
 GenomicRanges_1.44.0
 
@@ -27,11 +27,11 @@ tidyverse 1.3.2
 wesanderson 0.3.6
 
 
-### Figure 1.
-Fig_1.rmd contains the R code to reproduce fig. 1 b, c and d.
-The script calculates the STARR-seq peak summit enrichment at TE classes lineages and creates the upset plot of the STARR peak and TE overlaps.
+## Figure 1.
+### Fig_1.rmd contains the R code to reproduce fig. 1 b, c and d.
+### The script calculates the STARR-seq peak summit enrichment at TE classes lineages and creates the upset plot of the STARR peak and TE overlaps.
 
-Required additional packages for Fig_1.rmd:
+# Required additional packages for Fig_1.rmd:
 
 bedtoolsr 2.29.0-3
 
@@ -40,11 +40,11 @@ rstatix 0.7.1
 UpSetR 1.4.0
 
 ### Figure 2.
-Fig_2.rmd contains the R code to reproduce fig. 2 a, b c, d, Extended data figures 2a, b, c, d and e.
-The script creates the enriched heatmap of the GP5d clusters, the motif enrichment heatmap, the TE enrichment per cluster and the GP5d WT vs GP5d p53-null peak enrichment.
-The kmeans-clustering file required for the script is created with utils/kmeans-clustering.R.
+### Fig_2.rmd contains the R code to reproduce fig. 2 a, b c, d, Extended data figures 2a, b, c, d and e.
+### The script creates the enriched heatmap of the GP5d clusters, the motif enrichment heatmap, the TE enrichment per cluster and the GP5d WT vs GP5d p53-null peak enrichment.
+## The kmeans-clustering file required for the script is created with utils/kmeans-clustering.R.
 
-Required additional packages for Fig_2.rmd:
+# Required additional packages for Fig_2.rmd:
 
 bedtoolsr 2.29.0-3
 
@@ -68,11 +68,11 @@ rtracklayer 1.52.1
 
 TxDb.Hsapiens.UCSC.hg38.knownGene 3.13.0
 
-### Figure 3.
-Fig_3.rmd contains the R code to reproduce fig. 3 a, b, Extended data figures 3a, b and c.
-The script calculates the TE subfamily enrichment in GP5d and HepG2 and creates the subfamily-level motif heatmap.
+## Figure 3.
+### Fig_3.rmd contains the R code to reproduce fig. 3 a, b, Extended data figures 3a, b and c.
+### The script calculates the TE subfamily enrichment in GP5d and HepG2 and creates the subfamily-level motif heatmap.
 
-Required additional packages for Fig_3.rmd:
+# Required additional packages for Fig_3.rmd:
 
 bedtoolsr 2.29.0-3
 
@@ -86,9 +86,9 @@ rstatix 0.7.1
 
 Rsubread 2.6.4
 
-### Figure 5.
-Fig_5.rmd contains the R code to reproduce fig. 5a, b, and f.
-The script calculates the HepG2 non-methylated vs. methylated STARR-seq enrichment and creates the read count plots, the metaplot of signal enrichment and calculates the methylation differences between GP5d and HepG2.
+## Figure 5.
+### Fig_5.rmd contains the R code to reproduce fig. 5a, b, and f.
+### The script calculates the HepG2 non-methylated vs. methylated STARR-seq enrichment and creates the read count plots, the metaplot of signal enrichment and calculates the methylation differences between GP5d and HepG2.
 
 Required additional packages for Fig_5.rmd:
 
@@ -98,9 +98,9 @@ ggpubr 0.4.0
 
 Rsubread 2.6.4
 
-### Figure 6.
-Fig_6.rmd contains the R code to reproduce fig. 6a, b, Extended data fig. 7a, b, and c.
-The script processes the ABC and DEseq2 output data and creates the boxplots of TE contact gene expression.
+## Figure 6.
+### Fig_6.rmd contains the R code to reproduce fig. 6a, b, Extended data fig. 7a, b, and c.
+### The script processes the ABC and DEseq2 output data and creates the boxplots of TE contact gene expression.
 
-RNA_seq_processing.rmd contains the scripts to process RNA-seq count data with DEseq2 to expression tables used in fig_6.Rmd.
-Requires DESeq2 1.32.0 and tidyverse 1.3.2.
+### RNA_seq_processing.rmd contains the scripts to process RNA-seq count data with DEseq2 to expression tables used in fig_6.Rmd.
+### Requires DESeq2 1.32.0 and tidyverse 1.3.2.
