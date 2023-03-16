@@ -1,0 +1,316 @@
+---
+title: "fig_5"
+author: "KonstaK"
+date: "01/02/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  cache.lazy = FALSE,
+  echo = FALSE,
+  fig.height = 4,
+  fig.width = 6,
+  fig.asp = 0.618,
+  fig.show = "show",
+  out.width = "70%",
+  fig.align = "center",
+  fig.path = "plots/pngs/"
+)
+```
+
+#### Loading libraries:
+
+```{r libraries}
+library(tidyverse)
+library(GenomicRanges)
+library(ggrepel)
+library(ggpubr)
+library(Rsubread)
+library(bsseq)
+
+source("utils/random_regions.R")
+source("utils/utils.R")
+
+theme_set(theme_bw() +
+  theme(
+    line = element_line(size = unit(0.5, "points")),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    panel.border = element_blank(),
+    axis.text = element_text(color = "black", size = 8),
+    axis.title = element_text(color = "black", size = 10),
+    axis.line = element_line(size = unit(0.5, "pt")),
+    text = element_text(color = "black"),
+    legend.background = element_rect(color = "black", fill = NA, size = 0.5, linetype = "solid")
+  ))
+```
+
+```{r data}
+meth <- readRDS("data/bsmoothed/220407_GP5d_HepG2_cpg_BSmooth.rds")
+
+# Reading STARR summits for the non-methylated and methylated HepG2
+hepg2_nm_m_summit_files <- list(
+  hepg2_nm = "data/bed/220803_HepG2_STARR_summits_blacklisted_canonical_chrs.bed",
+  hepg2_m = "data/bed/221004_HepG2_STARR_methylated_summits_blacklisted_canonical_chrs.bed"
+)
+
+hepg2_nm_m_summits <- list(
+  hepg2_nm = read_tsv(hepg2_nm_m_summit_files$hepg2_nm, col_names = narrowpeak_colnames),
+  hepg2_m = read_tsv(hepg2_nm_m_summit_files$hepg2_m, col_names = narrowpeak_colnames)
+)
+```
+
+Fig. 5a
+
+```{r fig_5a_nm_m_scatterplots}
+shuf_n <- 1000
+
+hepg2_nm_m_shuf <- lapply(hepg2_nm_m_summit_files, shuffle_random_regions, n = shuf_n, rmsk = repeatmasker_gr, level = "subfamily", cores_n = 60)
+hepg2_nm_m_ovl <- lapply(GRangesList(hepg2_nm_m_summits), findOverlaps, subject = repeatmasker_gr, ignore.strand = T)
+
+hepg2_nm_m_ovl_counts <- lapply(seq_along(hepg2_nm_m_ovl), function(i) {
+  repeatmasker[subjectHits(hepg2_nm_m_ovl[[i]]), ] %>%
+    group_by(subf) %>%
+    dplyr::summarize(n = dplyr::n()) %>%
+    bind_rows(data.frame(subf = "Non_TE", n = queryLength(hepg2_nm_m_ovl[[i]]) - length(queryHits(hepg2_nm_m_ovl[[i]]))))
+})
+
+gp5d_hepg2_nm_m_ovl_stat <- lapply(seq_along(hepg2_nm_m_ovl), function(i) {
+  process_binomial_testing(hepg2_nm_m_shuf[[i]], hepg2_nm_m_ovl_counts[[i]], "subf", threshold = 0.05)
+})
+
+hepg2_nm_m_ovl_fisher <- bind_rows(gp5d_hepg2_nm_m_ovl_stat[[1]], gp5d_hepg2_nm_m_ovl_stat[[2]], .id = "line") %>%
+  mutate(line = ifelse(line == 1, "NM", "M")) %>%
+  pivot_wider(id_cols = subf, names_from = line, values_from = c(obs_exp, p_adj, sig, class, n, freq)) %>%
+  rowwise() %>%
+  filter(!is.na(n_NM) & !is.na(n_M)) %>%
+  mutate(pval_fisher = fisher.test(matrix(c(n_NM, freq_NM, n_M, freq_M), nrow = 2))$p.value) %>%
+  ungroup() %>%
+  mutate(
+    padj_fisher = p.adjust(pval_fisher, method = "BH"),
+    fisher_sig = ifelse(padj_fisher < 0.05, class_NM, "insig"),
+    lab = ifelse(fisher_sig != "insig", str_extract(subf, "[^\\|]+"), NA)
+  )
+
+hepg2_nm_m_ovl_fisher %>%
+  filter(n_NM >= 5 | n_M >= 5) %>%
+  ggplot(aes(x = obs_exp_NM, y = obs_exp_M, fill = factor(fisher_sig), size = factor(fisher_sig), label = lab)) +
+  geom_point(shape = 21) +
+  geom_abline(linetype = "dashed", color = "gray70") +
+  labs(
+    x = "HepG2 NM STARR-seq peak\nobserved/expected ratio",
+    y = "HepG2 M STARR-seq peak\nobserved/expected ratio"
+  ) +
+  scale_fill_manual(values = col_pal, name = "TE\nclass", limits = c("LINE", "SINE", "LTR", "DNA")) +
+  scale_size_manual(values = c(rep(1.5, 4), .3), limits = c("LINE", "SINE", "LTR", "DNA", "insig"), guide = "none") +
+  geom_text_repel(size = 2, min.segment.length = .1, max.iter = 10e8, max.time = 5, max.overlaps = 50) +
+  guides(
+    fill = guide_legend(override.aes = list(shape = 21, size = 2)),
+    shape = guide_legend(override.aes = list(size = 2))
+  ) +
+  scale_x_log10(breaks = c(1, 10, 100), expand = c(0, 0), limits = c(.1, 400)) +
+  scale_y_log10(breaks = c(1, 10, 100), expand = c(0, 0), limits = c(.1, 400)) +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_HepG2_STARR_NM_vs_M_TE_enrichment_scatterplot.pdf")
+# ggsave(path, width = 5, height = 4)
+```
+
+#### Fig. 5b
+
+```{r fig_5b_hepg2_starr_signal_boxplot}
+starr_bams_hepg2 <- c(
+  "HepG2_STARR_NM" = "data/bams/HepG2_STARR_combined_rmDup_CPmin_MapQ20.bam",
+  "HepG2_STARR_M" = "data/bams/HepG2_STARR_methylated_rmDup_CPmin_MapQ20.bam"
+)
+
+regs_hepg2 <- lapply(1:2, function(i) {
+  repeatmasker[subjectHits(hepg2_nm_m_ovl[[i]]), ] %>%
+    filter(te_name %in% c("THE1C", "THE1B", "L1PA3", "MER61E")) %>%
+    mutate(
+      strand = "*",
+      width = end - start
+    ) %>%
+    dplyr::rename(chr = seqnames, geneid = name)
+})
+
+counts_hepg2 <- lapply(regs_hepg2, run_featurecounts, bams = starr_bams_hepg2, paired = c(T, T))
+
+bind_rows(
+  bind_cols(regs_hepg2[[1]], counts_hepg2[[1]]),
+  bind_cols(regs_hepg2[[2]], counts_hepg2[[2]])
+) %>%
+  distinct() %>%
+  dplyr::select(te_name, geneid, HepG2_STARR_NM, HepG2_STARR_M) %>%
+  pivot_longer(cols = c(HepG2_STARR_NM, HepG2_STARR_M)) %>%
+  mutate(name = str_remove(name, "HepG2_STARR_"),
+         te_name = factor(te_name, levels = c("MER61E", "L1PA3", "THE1B", "THE1C"))) %>%
+  ggplot(aes(x = name, y = log2(value + 1), fill = name)) +
+  # geom_boxplot(outlier.shape = NA) +
+  geom_violin(outlier.shape = NA) +
+  geom_point(size = .2, alpha = .5, shape = 21) +
+  geom_line(aes(group = geneid), size = .1, alpha = .3) +
+  facet_grid(~te_name) +
+  stat_compare_means() +
+  theme(legend.position = "none") +
+  labs(x = " ", y = "RPKM + 1 (log2)")
+
+path <- paste0("plots/", today, "_HepG2_NM_M_TE_STARR_counts_boxplot.pdf")
+# ggsave(path, width = 4, height = 3)
+
+# Checking the n for each group:
+bind_rows(
+  bind_cols(regs_hepg2[[1]], counts_hepg2[[1]]),
+  bind_cols(regs_hepg2[[2]], counts_hepg2[[2]])
+) %>%
+  distinct() %>%
+  dplyr::select(te_name, geneid, HepG2_STARR_NM, HepG2_STARR_M) %>%
+  pivot_longer(cols = c(HepG2_STARR_NM, HepG2_STARR_M)) %>%
+  mutate(name = str_remove(name, "HepG2_STARR_")) %>% 
+  group_by(te_name) %>% 
+  mutate(n = dplyr::n()) %>% 
+  dplyr::select(-geneid, -value) %>% 
+  distinct()
+```
+
+#### Fig. 5e
+
+```{r hepg2_starr_zbtb_lineplot}
+zbtb_bw <- c(
+  # "ZBTB33" = "/data/dpatel/HepG2/ZBTB33_ChIP_Liver_Tissue/Hepatic_ZBTB33_ChIP_SRR5338833_final.bw",
+  "ZBTB33" = "data/bigwigs/HepG2_ZBTB33_merged_final.bw",
+  "STARR_NM" = "data/bigwigs/HepG2_STARR_combined_rmDup_CPmin_MapQ20.bw",
+  "STARR_M" = "data/bigwigs/HepG2_STARR_methylated_rmDup_CPmin_MapQ20.bw"
+)
+
+filt <- bind_rows(
+  repeatmasker[subjectHits(hepg2_nm_m_ovl$hepg2_nm), ],
+  repeatmasker[subjectHits(hepg2_nm_m_ovl$hepg2_m), ]
+) %>%
+  filter(te_name %in% c("THE1B", "THE1C")) %>%
+  pull(name)
+
+ctrl_regs_hepg2_the1 <- repeatmasker %>%
+  filter(te_name %in% c("THE1B", "THE1C"), !name %in% filt) %>%
+  sample_n(1000) %>%
+  mutate(
+    strand = "*",
+    width = end - start,
+    start = start + floor(width / 2),
+    end = start + 1,
+  ) %>%
+  group_by(te_name) %>%
+  group_split(.keep = T) %>%
+  lapply(., GRanges)
+
+regs_hepg2_the1 <- repeatmasker[subjectHits(hepg2_nm_m_ovl$hepg2_nm), ] %>%
+  filter(te_name %in% c("THE1B", "THE1C")) %>%
+  mutate(
+    strand = "*",
+    width = end - start,
+    start = start + floor(width / 2),
+    end = start + 1,
+  ) %>%
+  group_by(te_name) %>%
+  group_split(.keep = T) %>%
+  lapply(., GRanges)
+
+reg_size <- 1000
+regs_hepg2_the1_cov <- bind_rows(
+  plot_profile(bws = zbtb_bw, regs = regs_hepg2_the1, rollmean_window = 25, size = reg_size) %>% mutate(type = "STARR+"),
+  plot_profile(bws = zbtb_bw, regs = ctrl_regs_hepg2_the1, rollmean_window = 25, size = reg_size) %>% mutate(type = "STARR-")
+)
+
+ggplot(regs_hepg2_the1_cov, aes(x = coord, y = rollmean, linetype = factor(type, levels = c("STARR+", "STARR-")), color = factor(sample))) +
+  geom_line(size = .5, alpha = .9) +
+  facet_wrap(~te_name) +
+  scale_x_continuous(breaks = c(0, reg_size, reg_size * 2), labels = c(paste0("-", reg_size), "0", paste0("+", reg_size)), expand = c(0.01, 0.01)) +
+  labs(x = "Coordinate", y = "RPKM + 1 (log2)") +
+  scale_color_nejm() +
+  theme(
+    # panel.spacing.x = unit(1.5, "lines"),
+    legend.position = "bottom",
+    plot.margin = margin(2, 5, 2, 2, unit = "mm")
+  ) +
+  labs(color = "Assay", linetype = "Type")
+
+path <- paste0("plots/", today, "_HepG2_THE1_STARR_ZBTB33_metaplot.pdf")
+# ggsave(path, width = 5, height = 3.5)
+```
+
+#### Fig. 5f
+
+```{r fig_5f_hepg2_methylation_boxplot}
+
+hepg2_starr_the_ovl <- repeatmasker[subjectHits(hepg2_nm_m_ovl$hepg2_nm), ] %>% filter(te_name %in% c("THE1B", "THE1C"))
+
+reg_meth_the1b <- getMeth(meth, regions = hepg2_starr_the_ovl %>% filter(te_name == "THE1B") %>% GRanges(), what = "perRegion", type = "smooth")
+reg_meth_the1c <- getMeth(meth, regions = hepg2_starr_the_ovl %>% filter(te_name == "THE1C") %>% GRanges(), what = "perRegion", type = "smooth")
+colnames(reg_meth_the1b) <- c("GP5d", "HepG2")
+colnames(reg_meth_the1c) <- c("GP5d", "HepG2")
+
+bind_rows(
+  reg_meth_the1b %>% as_tibble() %>% mutate(te = "THE1B"),
+  reg_meth_the1c %>% as_tibble() %>% mutate(te = "THE1C")
+) %>%
+  mutate(id = row_number()) %>%
+  pivot_longer(cols = c(GP5d, HepG2)) %>%
+  ggplot(aes(x = name, y = value)) +
+  facet_wrap(~te) +
+  geom_point(size = .2, alpha = .5) +
+  geom_line(aes(group = id), size = .1, alpha = .3) +
+  geom_boxplot() +
+  stat_compare_means()
+
+path <- paste0("plots/", today, "_GP5d_HepG2_THE1_methylation_boxplot.pdf")
+# ggsave(path, width = 4, height = 3)
+
+bind_rows(
+  reg_meth_the1b %>% as_tibble() %>% mutate(te = "THE1B"),
+  reg_meth_the1c %>% as_tibble() %>% mutate(te = "THE1C")
+) %>%
+  mutate(id = row_number()) %>%
+  pivot_longer(cols = c(GP5d, HepG2)) %>% 
+  group_by(te) %>% 
+  dplyr::summarise(n())
+```
+
+```{r}
+
+
+
+all_starr_tes <- repeatmasker[subjectHits(hepg2_nm_m_ovl$hepg2_nm), ] %>% 
+  mutate(score = hepg2_nm_m_summits$hepg2_nm[queryHits(hepg2_nm_m_ovl$hepg2_nm), ]$score)
+
+# hepg2_nm_starr_counts <- run_featurecounts(all_starr_tes %>% mutate(width = end - start) %>% mutate(chr = seqnames, geneid = name), bams = starr_bams_hepg2[1], paired = T)
+reg_meth_raw <- getMeth(meth, regions = all_starr_tes %>% GRanges(), what = "perRegion", type = "raw")
+reg_meth_smooth <- getMeth(meth, regions = all_starr_tes %>% GRanges(), what = "perRegion", type = "smooth")
+
+all_starr_tes %>% 
+  mutate(meth = reg_meth_the[,2]) %>% 
+  filter(te_name == "LTR12C", !is.na(meth)) %>% 
+  ggplot(aes(x = score, y = meth)) +
+  geom_point() +
+  facet_wrap(~te_name) +
+  stat_cor()
+
+ggsave("test.pdf", width = 30, height = 40)
+  
+all_starr_tes %>% 
+  mutate(counts = hepg2_nm_starr_counts$HepG2_STARR_NM,
+         meth = reg_meth_the[,2])
+
+hepg2_nm_m_ovl
+```
+
+#### Plot the largest STARR signal differences between HepG2 NM and M
+
+```{r}
+
+```
+

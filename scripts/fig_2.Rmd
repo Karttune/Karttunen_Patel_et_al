@@ -1,0 +1,525 @@
+---
+title: "fig_2"
+author: "KonstaK"
+date: "01/02/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  cache.lazy = FALSE,
+  echo = FALSE,
+  fig.height = 4,
+  fig.width = 6,
+  fig.asp = 0.618,
+  fig.show = "show",
+  out.width = "70%",
+  fig.align = "center",
+  fig.path = "plots/pngs/"
+)
+
+```
+
+#### Loading libraries:
+
+```{r libraries}
+library(tidyverse)
+library(GenomicRanges)
+library(ggrepel)
+library(ChIPseeker)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(ggpubr)
+
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+
+source("utils/random_regions.R")
+source("utils/utils.R")
+source("utils/EnrichedHeatmap.R")
+
+theme_set(theme_bw() +
+  theme(
+    line = element_line(linewidth = unit(0.5, "points")),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    panel.border = element_blank(),
+    axis.text = element_text(color = "black", size = 8),
+    axis.title = element_text(color = "black", size = 10),
+    axis.line = element_line(linewidth = unit(0.5, "pt")),
+    text = element_text(color = "black"),
+    legend.background = element_rect(color = "black", fill = NA, linewidth = 0.5, linetype = "solid")
+  ))
+```
+
+#### Reading data:
+
+```{r data}
+# Reading STARR peak summits for GP5d WT and p53-null; C2 is shorthand for the p53-null peaks
+gp5d_starr_summit_files <- c("data/bed/220803_GP5D_STARR_WT_summits_blacklisted_canonical_chrs.bed",
+                             "data/bed/220803_GP5D_STARR_C2_summits_blacklisted_canonical_chrs.bed")
+
+gp5d_starr_summits <- list(
+  wt = read_tsv(gp5d_starr_summit_files[1], col_names = narrowpeak_colnames),
+  c2 = read_tsv(gp5d_starr_summit_files[2], col_names = narrowpeak_colnames)
+)
+
+gp5d_starr_pks <- read_tsv("data/bed/GP5D_WT_STARR_NM_peaks_blacklisted_canonical_chrs.bed", col_names = narrowpeak_colnames)
+
+# Converting STARR-seq peaks to GRanges objects
+gp5d_starr_summits_gr <- lapply(gp5d_starr_summits, GRanges)
+```
+
+#### Fig. 2a
+
+```{r fig_2a_enriched_heatmap}
+# Kmeans clustering results from the utils/kmeans_clustering.R script
+kmeans_list <- readRDS("data/kmeans/220506_GP5D_STARR_kmeans_normalized_scaled.rds")
+kmeans <- kmeans_list[[4]]
+
+peaks <- read_tsv("data/bed/GP5D_WT_STARR_peaks_blacklisted_canonical_chrs.bed", col_names = narrowpeak_colnames) # Full peaks for the heatmap figure
+
+# A list of GRanges for the EnrichedHeatmap function:
+gp5d_starr_peaks_clusters_gr <- peaks %>% 
+  mutate(cluster = kmeans$cluster) %>% 
+  group_by(cluster) %>% 
+  group_split(.keep = T) %>% 
+  lapply(., GRanges)
+
+cluster_n <- length(unique(kmeans$cluster))
+names(gp5d_starr_peaks_clusters_gr) <- paste0("Cluster_", 1:cluster_n)
+
+# These can be set as the .bw files from GEO
+# A character vector of all the used .bw files:
+bw_files <- c(
+   "data/bigwigs/GP5D_STARR_WT_rmDup_CPmin_MapQ20_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_WT_ATAC_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_H3K4me1_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_H3K4me3_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_H3K9me3_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_H3K27ac_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_H3K27me3_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_H3K36me3_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_p53_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/GP5D_p53_5-FU_final_50bp_bin_RPKM_normalized.bw",
+   "data/bigwigs/methylation_calls.GP5D.raw.cpg.mfreq.bw"
+)
+
+extension <- 3000 # Extension from the peak summit to both directions
+p <- 60 # Cores used for the heatmap script
+
+bw_names <- c("STARR", "ATAC", "H3K4me1", "H3K4me3", "H3K9me3", "H3K27ac", "H3K27me3", "H3K36me3", "p53", "p53_5-FU", "CpG")
+
+# Path to save the plot to:
+out <- paste0("plots/", today, "_GP5D_enriched_heatmap_input_normalized", paste(bw_names, collapse = "_"), "_", cluster_n, "_clusters.pdf")
+
+# Setting heatmap normalization parameters:
+norm_params <- data.frame(
+  window = rep(50, length(bw_files)),
+  keep_low = rep(0, length(bw_files)),
+  keep_high = rep(.99, length(bw_files)),
+  value_column = rep("score", length(bw_files)),
+  background = rep(0, length(bw_files)),
+  target_ratio = rep(0, length(bw_files)),
+  mean_mode = rep("w0", length(bw_files)),
+  smooth = c(rep(T, length(bw_files)))
+)
+
+# Run the EnrichedHeatmap function:
+makeEnrichedHeatmap(gp5d_starr_peaks_clusters_gr, bw_files, bw_names, norm_params, out, extension, p)
+```
+
+#### Fig. 2b
+
+```{r fig_2b_cluster_motifs}
+vierstra_clusters <- read_tsv("annotations/vierstra_2020_clusters_metadata.tsv")
+
+vierstra_clusters <- vierstra_clusters %>%
+  filter(str_starts(source_id, "MA\\d+")) %>% # Filtering only JASPAR motifs
+  arrange(source_id)
+
+# Loading the motif discovery results from AME, motif discovery was performed on all the peaks in each cluster separately 
+dirs <- c(paste0("data/meme/220510_cluster", 1:5, "_all/ame.tsv"))
+
+cluster_motifs <- bind_rows(lapply(seq_along(dirs), function(i) {
+  table <- read_tsv(dirs[i], comment = "#", skip = 1, col_names = ame_cnames)
+  if (!is_empty(table)) table %>% mutate(cluster_kmeans = i)
+}))
+
+cutoff <- 1e-5
+
+cluster_motifs_top <- cluster_motifs %>%
+  left_join(., vierstra_clusters %>% dplyr::select(source_id, cluster), by = c("motif_ID" = "source_id")) %>%
+  filter(
+    adj_pval < cutoff,
+    motif_ID %in% vierstra_clusters$source_id
+  ) %>%
+  group_by(cluster_kmeans, cluster) %>%
+  dplyr::summarize(min_eval = min(eval), tf_comb = paste0(motif_name, collapse = "/")) %>%
+  group_by(cluster_kmeans) %>%
+  arrange(cluster_kmeans, min_eval) %>%
+  dplyr::slice(1:6) %>% # Choosing to display 6 top motifs per cluster 
+  pull(cluster) %>%
+  unique() %>%
+  sort()
+
+cluster_motifs_scl_mat <- cluster_motifs %>%
+  filter(
+    motif_ID %in% vierstra_clusters$source_id
+  ) %>%
+  left_join(., vierstra_clusters %>% dplyr::select(source_id, cluster), by = c("motif_ID" = "source_id")) %>%
+  filter(cluster %in% cluster_motifs_top) %>%
+  mutate(log10_eval = -log10(eval)) %>%
+  dplyr::select(cluster, cluster_kmeans, motif_name, log10_eval) %>%
+  group_by(cluster) %>%
+  arrange(motif_name) %>%
+  mutate(
+    motif_name_comb = paste0(unique(motif_name), collapse = "/"),
+    motif_name_comb = paste0(cluster, ": ", motif_name_comb),
+  ) %>%
+  group_by(motif_name_comb, cluster_kmeans) %>%
+  dplyr::summarize(log10_eval_mean = mean(log10_eval)) %>%
+  ungroup() %>%
+  arrange(cluster_kmeans) %>%
+  pivot_wider(names_from = cluster_kmeans, values_from = log10_eval_mean, values_fill = 0) %>% # In case of several same motifs, taking the smallest log p-value with values_fn
+  mutate(across(2:last_col(), scale.default, center = F)) %>% # Scaling the columns without centering
+  mutate(motif_name_comb = paste0(motif_name_comb)) %>%
+  column_to_rownames("motif_name_comb") %>%
+  as.matrix()
+
+breaks <- seq(0, max(cluster_motifs_scl_mat), length.out = 9)
+
+row_split_lab <- str_extract(rownames(cluster_motifs_scl_mat), "(?<=\\|).+")
+row_split <- str_remove_all(row_split_lab, "\\/.+")
+
+rownames(cluster_motifs_scl_mat) <- str_remove(rownames(cluster_motifs_scl_mat), "\\|.+")
+
+# Plotting the actual heatmap with rownames:
+htmp <- Heatmap(cluster_motifs_scl_mat,
+  row_names_max_width = unit(20, "cm"),
+  cluster_row_slices = T,
+  border = T,
+  name = "Motif enrichment\nZ-score -log10(E-value)",
+  col = colorRamp2(breaks, heat_cols_orrd),
+  rect_gp = gpar(col = "black", lwd = .1),
+
+  # Parameters for the colour-bar that represents gradient of motif enrichment
+  heatmap_legend_param = list(
+    color_bar = "continuous",
+    legend_direction = "horizontal",
+    legend_width = unit(5, "cm"),
+    legend_height = unit(4, "cm"),
+    title_position = "topcenter",
+    title_gp = gpar(fontsize = 8),
+    labels_gp = gpar(fontsize = 6),
+    border = "black"
+  ),
+
+  # Row (TF) parameters
+  cluster_rows = T,
+  show_row_dend = T,
+  clustering_method_rows = "ward.D2",
+  row_title_side = "left",
+  row_title_gp = gpar(fontsize = 8),
+  row_title_rot = 0,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  row_names_side = "right",
+  row_dend_width = unit(15, "mm"),
+
+  # Column (cluster) parameters
+  cluster_columns = F,
+  column_title_side = "top",
+  column_title_gp = gpar(fontsize = 8),
+  column_title_rot = 0,
+  column_names_gp = gpar(fontsize = 8),
+  column_names_max_height = unit(10, "cm"),
+  column_names_rot = 0,
+  column_names_centered = T,
+  column_dend_height = unit(25, "mm")
+)
+
+path <- paste0("plots/", today, "_GP5D_WT_JASPAR_kmeans_cluster_motif_heatmap_top6.pdf")
+# pdf(path, width = 12, height = 5)
+draw(htmp, heatmap_legend_side = "bottom")
+# dev.off()
+```
+#### Fig. 2c
+
+```{r fig 2c_te_enrichment_scatterplot}
+shuf_n <- 1000
+
+paths <- paste0("data/kmeans/220804_GP5D_WT_STARR_summits_cluster_", 1:5, ".bed")
+
+wt_starr_summits_cl <- lapply(paths, read_tsv, col_names = c("seqnames", "start", "end", "name", "score"))
+
+# Running the shuffling function for peak summits in each cluster:
+wt_starr_summits_cl_shuf <- lapply(seq_along(paths), function(i) {
+   shuffle_random_regions(paths[[i]], shuf_n, repeatmasker_gr, level = "subfamily")
+  })
+
+# Observed overlaps for STARR peaks
+wt_starr_summits_cl_ovl <- lapply(seq_along(wt_starr_summits_cl), function(i) {
+  findOverlaps(GRanges(wt_starr_summits_cl[[i]]), repeatmasker_gr, ignore.strand = T)
+})
+
+wt_starr_summits_cl_ovl_counts <- lapply(seq_along(wt_starr_summits_cl_ovl), function(i) {
+  repeatmasker[subjectHits(wt_starr_summits_cl_ovl[[i]]), ] %>%
+    group_by(subf) %>%
+    dplyr::summarize(n = dplyr::n()) %>%
+    bind_rows(data.frame(subf = "Non_TE", n = queryLength(wt_starr_summits_cl_ovl[[i]]) - length(unique(queryHits(wt_starr_summits_cl_ovl[[i]])))))
+})
+
+# Processing the binomial testing for each cluster
+wt_starr_summits_cl_ovl_stat <- lapply(seq_along(wt_starr_summits_cl_ovl_counts), function(i) {
+  process_binomial_testing(wt_starr_summits_cl_shuf[[i]], wt_starr_summits_cl_ovl_counts[[i]], "subf")
+})
+
+# Plotting in a scatterplot
+bind_rows(wt_starr_summits_cl_ovl_stat, .id = "cluster") %>% 
+  filter(n >= 3) %>% # Only filtering out TEs with less than 3 overlaps
+  mutate(sig = ifelse(p_adj < 0.01 & obs_exp > 10, class, "insig"),
+         lab = ifelse(sig != "insig", str_extract(subf, "[^\\|]+"), NA)) %>% 
+  ggplot(aes(x = obs_exp, y = -log10(p_adj), fill = factor(sig), label = lab, size = factor(sig))) +
+  facet_wrap(~cluster, scales = "free") +
+  geom_jitter(shape = 21) +
+  geom_vline(xintercept = 10, linetype = "dashed", color = "gray70", alpha = .7) +
+  geom_hline(yintercept = -log10(0.01), linetype = "dashed", color = "gray70", alpha = .7) +
+  geom_text_repel(size = 2, min.segment.length = .01, segment.size = 0.05, force = 25, max.iter = 1e8) +
+  scale_fill_manual(values = col_pal, name = "TE\nsubfamily", limits = c("LINE", "SINE", "LTR", "DNA")) +
+  scale_size_manual(values = c(rep(1.5, 4), .3), limits = c("LINE", "SINE", "LTR", "DNA", "insig"), guide = "none") +
+  labs(x = "Observed/expected ratio", y = "Adjusted P-value (-log10)") +
+  scale_x_log10() +
+  theme(
+    legend.position = "none",
+    plot.margin = margin(1, 3, 1, 1, unit = "mm")
+  )
+
+path <- paste0("plots/", today, "_GP5d_STARR_clusters_TE_enrichment_scatterplot.pdf")
+# ggsave(path, width = 10, height = 6)
+
+wt_starr_summits_cl_ovl_stat[[1]] %>% 
+  filter(sig != "insig")
+```
+#### Fig. 2d
+
+```{r fig_2d_starr_wt_vs_p53null}
+
+# Shuffling WT and p53-null peak summits
+starr_summits_shuf <- list(
+  wt = shuffle_random_regions(gp5d_starr_summit_files[1], shuf_n, repeatmasker_gr, level = "subfamily", cores_n = 60),
+  c2 = shuffle_random_regions(gp5d_starr_summit_files[2], shuf_n, repeatmasker_gr, level = "subfamily", cores_n = 60)
+)
+
+# Overlapping observed peak summits with TEs
+starr_summits_te_ovl <- list(
+  wt = findOverlaps(GRanges(gp5d_starr_summits$wt), repeatmasker_gr),
+  c2 = findOverlaps(GRanges(gp5d_starr_summits$c2), repeatmasker_gr)
+)
+
+starr_summits_te_ovl_counts <- lapply(seq_along(starr_summits_te_ovl), function(i) {
+  repeatmasker[subjectHits(starr_summits_te_ovl[[i]]), ] %>%
+    group_by(subf) %>%
+    dplyr::summarize(n = dplyr::n()) %>%
+    bind_rows(data.frame(subf = "Non_TE", n = queryLength(starr_summits_te_ovl[[i]]) - length(queryHits(starr_summits_te_ovl[[i]]))))
+})
+
+starr_summits_te_ovl_stat <- list(wt = process_binomial_testing(starr_summits_shuf[[1]], starr_summits_te_ovl_counts[[1]], "subf"),
+                                  c2 = process_binomial_testing(starr_summits_shuf[[2]], starr_summits_te_ovl_counts[[2]], "subf"))
+
+# Comparing WT and p53-null with a one-sided Fisher's test
+starr_summits_te_ovl_fisher <- bind_rows(starr_summits_te_ovl_stat, .id = "line") %>% 
+  pivot_wider(id_cols = subf, names_from = line, values_from = c(obs_exp, p_adj, sig, class, n, freq)) %>%  
+  rowwise() %>%
+  mutate(pval_fisher = fisher.test(matrix(c(n_wt, freq_wt, n_c2, freq_c2), nrow = 2), alternative = "greater")$p.value) %>% 
+  ungroup() %>%
+  mutate(
+    padj_fisher = p.adjust(pval_fisher, method = "BH"),
+    fisher_sig = ifelse(padj_fisher < 0.01, class_wt, "insig"),
+    lab = ifelse(fisher_sig != "insig" & obs_exp_wt > 10, str_extract(subf, "[^\\|]+"), NA))
+
+ggplot(starr_summits_te_ovl_fisher, aes(x = obs_exp_wt, y = obs_exp_c2, fill = factor(fisher_sig), size = factor(fisher_sig), label = lab)) +
+  geom_point(shape = 21) +
+  geom_abline(linetype = "dashed", color = "gray70", alpha = .7) +
+  labs(
+    x = "GP5d WT STARR peak\nobserved/expected ratio",
+    y = "GP5d p53-null STARR peak\nobserved/expected ratio"
+  ) +
+  scale_fill_manual(values = col_pal, name = "TE class", limits = c("LINE", "SINE", "LTR", "DNA")) +
+  scale_size_manual(values = c(rep(2, 4), .3), limits = c("LINE", "SINE", "LTR", "DNA", "insig"), guide = "none") +
+  geom_text_repel(size = 2.5, min.segment.length = .1, max.iter = 10e8) +
+  scale_x_log10(breaks = c(0, 1, 10, 100), expand = c(0, 0), limits = c(.5, 250)) +
+  scale_y_log10(breaks = c(0, 1, 10, 100), expand = c(0, 0), limits = c(.5, 250)) +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_GP5D_STARR_WT_vs_C2_TE_enrichment_scatterplot.pdf")
+# ggsave(path, width = 4, height = 3.5)
+```
+
+#### Extended data fig. 2a
+
+```{r extended_fig_2a_elbow_plot}
+
+# Taking the total sum of squares for each clustering from 2 to 9 and plotting in an elbow plot:
+kmeans_tot_ss <- tibble(
+  clusters = 2:9,
+  sum_of_squares = sapply(seq_along(kmeans_list), function(i) {
+    kmeans_list[[i]]$tot.withinss
+  })
+)
+
+ggplot(kmeans_tot_ss, aes(x = clusters, y = sum_of_squares)) +
+  geom_point(size = .9) +
+  geom_line() +
+  labs(x = "Clusters", y = "Sum of squares") +
+  geom_segment(aes(x = 5.05, y = 3.92e09, xend = 5.5, yend = 4.3e09), color = "black", arrow = arrow(length = unit(0.03, "npc"), ends = "first"))
+
+path <- paste0("plots/", today, "_GP5D_clusters_elbow.pdf")
+# ggsave(path, width = 4, height = 3)
+```
+
+#### Extended data fig. 2b
+
+```{r extended_fig_2b_cluster_feature_distribution}
+
+wt_starr_pks_cl_list <- gp5d_starr_pks %>% 
+  mutate(cluster = kmeans$cluster) %>% 
+  group_by(cluster) %>%
+  group_split(.keep = T)
+
+wt_starr_pks_cl_peakAnno <- lapply(seq_along(wt_starr_pks_cl_list), function(i) {
+  annotated <- wt_starr_pks_cl_list[[i]] %>%
+    GRanges() %>%
+    annotatePeak(.,
+      level = "gene",
+      tssRegion = c(-1000, 1000),
+      TxDb = txdb,
+      annoDb = "org.Hs.eg.db"
+    )
+})
+
+wt_starr_pks_cl_annostat <- bind_rows(lapply(seq_along(wt_starr_pks_cl_peakAnno), function(i) {
+  wt_starr_pks_cl_peakAnno[[i]]@annoStat %>%
+    mutate(cluster = i)
+}))
+
+obs <- tibble(cluster = 1:5, obs = sapply(wt_starr_pks_cl_list, nrow), y = rep(1.06, 5)) # Counting how many peaks in each cluster for plotting
+
+# Plotting the distribution of peaks in different chromatin features:
+wt_starr_pks_cl_annostat %>%
+  mutate(Feature = str_remove_all(Feature, "1st |Other | \\([:graph:]+\\)")) %>% # Combining values for 1st and other exons and introns and different promoter distances
+  filter(Feature != "Downstream") %>%
+  ggplot(aes(x = Frequency, y = factor(cluster, levels = c(5, 4, 3, 2, 1)), fill = Feature)) +
+  geom_bar(position = "fill", stat = "identity") +
+  geom_text(inherit.aes = F, data = obs, aes(x = y, y = factor(cluster), label = paste0("N = ", obs)), hjust = 0) +
+  coord_cartesian(
+    xlim = c(0, 1), # This focuses the x-axis on the range of interest
+    clip = "off"
+  ) +
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "bottom",
+    plot.margin = margin(.5, 2.5, .5, .5, "cm")
+  ) +
+  scale_fill_nejm() +
+  scale_x_continuous(expand = c(0, 0))
+
+path <- paste0("plots/", today, "_GP5D_STARR_clusters_genomic_distribution_barplot.pdf")
+# ggsave(path, height = 4, width = 5.5)
+```
+
+#### Extended data fig. 2c
+
+```{r extended_fig_2c_te_ovl_distribution_clusters}
+
+tibble(peak_n = unlist(lapply(wt_starr_summits_cl, nrow)),
+       te_ovl = unlist(lapply(lapply(wt_starr_summits_cl_ovl, subjectHits), length))) %>% 
+  mutate(te_ovl / peak_n * 100)
+
+tibble(peak_n = unlist(lapply(wt_starr_summits_cl, nrow)),
+       te_ovl = unlist(lapply(lapply(wt_starr_summits_cl_ovl, subjectHits), length))) %>% 
+  mutate(ovl_percentage = te_ovl / peak_n * 100,
+         cluster = 1:5,
+         peak_non_te = peak_n - te_ovl) %>% 
+  pivot_longer(cols = c(peak_non_te, te_ovl)) %>% 
+  ggplot(aes(x = value, y = factor(cluster, levels = c(5:1)), fill = name)) +
+  # geom_col() +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_x_continuous(expand = c(0,0)) +
+  labs(x = "Percentage", y = "Cluster") +
+  theme(legend.position = "top")
+
+path <- paste0("plots/", today, "_GP5d_STARR_clusters_peak_te_ovl_barplot.pdf")
+# ggsave(path, width = 4, height = 3)
+```
+
+#### Extended data fig. 2d
+
+```{r}
+
+labs <- c("MER61C", "MER61E", "MER61D", "LTR10B1", "LTR10B2", "LTR10E")
+
+p53_preds <- read_tsv("annotations/p53_binding_predictions_wang_2007.txt") # Loading in the p53 predictions from Wang et al. 2007
+colnames(p53_preds) <- str_replace_all(colnames(p53_preds), "\\/|\\s", "_")
+
+bind_rows(starr_summits_te_ovl_stat, .id = "line") %>% 
+  mutate(te_name = str_extract(subf, "[^\\|]+")) %>% 
+  inner_join(., p53_preds, by = c("te_name" = "LTR_ERV")) %>% 
+  mutate(lab = ifelse(te_name %in% labs, te_name, NA)) %>% 
+  ggplot(aes(x = obs_exp, y = Percentage, fill = line, color = line, label = lab)) +
+  geom_point(shape = 21, color = "black") +
+  geom_text_repel(size = 2.5) +
+  geom_smooth(method = "lm", se = F) +
+  stat_cor() +
+  scale_fill_nejm() +
+  scale_color_nejm() +
+  theme(legend.position = "bottom") +
+  labs(x = "Observed/expected ratio", y = "Percentage of p53 sites in element") +
+  scale_x_continuous(expand = c(0.01,0.02)) +
+  scale_y_continuous(expand = c(0.01,0.02))
+
+path <- paste0("plots/", today, "_GP5D_WT_C2_HepG2_p53_binding_correlations.pdf")
+# ggsave(path, height = 5, width = 6)
+```
+
+#### Extended data fig. 2e
+
+```{r}
+# Loading p53 summits and doing the shuffling as previously
+p53_summits <- read_tsv("data/bed/220803_GP5D_p53_summits_blacklisted_canonical_chrs.bed", col_names = narrowpeak_colnames)
+
+wt_p53_summits_class_shuf_ovl <- shuffle_random_regions("data/bed/220803_GP5D_p53_summits_blacklisted_canonical_chrs.bed", shuf_n, repeatmasker_gr, level = "class")
+
+wt_p53_summits_class_ovl <- findOverlaps(GRanges(p53_summits), repeatmasker_gr)
+
+wt_p53_summits_class_ovl_counts <- repeatmasker[subjectHits(wt_p53_summits_class_ovl), ] %>%
+  group_by(class) %>%
+  dplyr::summarize(n = dplyr::n()) %>%
+  bind_rows(data.frame(class = "Non_TE", n = queryLength(wt_p53_summits_class_ovl) - length(queryHits(wt_p53_summits_class_ovl))))
+
+wt_p53_summits_class_ovl_stat <- process_binomial_testing(wt_p53_summits_class_shuf_ovl, wt_p53_summits_class_ovl_counts, grp_factor = "class")
+
+wt_p53_summits_class_ovl_stat %>% 
+  mutate(line = "GP5d") %>% 
+  drop_na() %>% 
+  ggplot(aes(x = class, y = line, fill = obs_exp, label = sym)) +
+  geom_tile() +
+  geom_label() +
+  scale_fill_gradient2(low = heat_cols_red[1], mid = heat_cols_red[2], high = heat_cols_red[3], midpoint = 1, breaks = c(0.5, 1, 1.5), name = "Observed/expected\nratio") +
+  theme(
+    axis.title = element_blank(),
+    legend.position = "bottom"
+  ) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0))
+
+path <- paste0("plots/", today, "_GP5D_p53_TE_class_OE_ratio_heatmap.pdf")
+# ggsave(path, width = 3.5, height = 1.5)
+```
+
+
+
+
+

@@ -1,0 +1,468 @@
+---
+title: "fig_3"
+author: "KonstaK"
+date: "01/02/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  cache.lazy = FALSE,
+  echo = FALSE,
+  fig.height = 4,
+  fig.width = 6,
+  fig.asp = 0.618,
+  fig.show = "show",
+  out.width = "70%",
+  fig.align = "center",
+  fig.path = "plots/pngs/"
+)
+```
+
+#### Loading libraries:
+
+```{r libraries}
+library(tidyverse)
+library(GenomicRanges)
+library(ggrepel)
+library(ComplexHeatmap)
+library(circlize)
+library(ggpubr)
+library(Rsubread)
+
+source("utils/random_regions.R")
+source("utils/utils.R")
+
+theme_set(theme_bw() +
+  theme(
+    line = element_line(size = unit(0.5, "points")),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    panel.border = element_blank(),
+    axis.text = element_text(color = "black", size = 8),
+    axis.title = element_text(color = "black", size = 10),
+    axis.line = element_line(size = unit(0.5, "pt")),
+    text = element_text(color = "black"),
+    legend.background = element_rect(color = "black", fill = NA, size = 0.5, linetype = "solid")
+  ))
+```
+
+#### Reading data:
+
+```{r data}
+# Reading STARR-seq peak summit files for GP5d and HepG2 WT.
+gp5d_hepg2_starr_summit_files <- c(
+  "data/bed/220803_GP5D_STARR_WT_summits_blacklisted_canonical_chrs.bed",
+  "data/bed/220803_HepG2_STARR_summits_blacklisted_canonical_chrs.bed"
+)
+
+gp5d_hepg2_starr_summits <- list(
+  gp5d = read_tsv(gp5d_hepg2_starr_summit_files[1], col_names = narrowpeak_colnames),
+  hepg2 = read_tsv(gp5d_hepg2_starr_summit_files[2], col_names = narrowpeak_colnames)
+)
+
+# Converting STARR-seq peaks to GRanges objects
+gp5d_hepg2_starr_summits_gr <- lapply(gp5d_hepg2_starr_summits, GRanges)
+```
+
+#### Fig. 3a
+
+```{r fig_3a_te_enrichment_scatterplot}
+shuf_n <- 1000
+
+gp5d_hepg2_starr_summits_shuf <- list(
+  gp5d = shuffle_random_regions(gp5d_hepg2_starr_summit_files[1], shuf_n, repeatmasker_gr, level = "subfamily"),
+  hepg2 = shuffle_random_regions(gp5d_hepg2_starr_summit_files[2], shuf_n, repeatmasker_gr, level = "subfamily")
+)
+
+gp5d_hepg2_starr_summits_te_ovl <- list(
+  gp5d = findOverlaps(GRanges(gp5d_hepg2_starr_summits$gp5d), repeatmasker_gr),
+  hepg2 = findOverlaps(GRanges(gp5d_hepg2_starr_summits$hepg2), repeatmasker_gr)
+)
+
+gp5d_hepg2_starr_summits_te_ovl_counts <- lapply(seq_along(gp5d_hepg2_starr_summits_te_ovl), function(i) {
+  repeatmasker[subjectHits(gp5d_hepg2_starr_summits_te_ovl[[i]]), ] %>%
+    group_by(subf) %>%
+    dplyr::summarize(n = dplyr::n()) %>%
+    bind_rows(data.frame(subf = "Non_TE", n = queryLength(gp5d_hepg2_starr_summits_te_ovl[[i]]) - length(queryHits(gp5d_hepg2_starr_summits_te_ovl[[i]]))))
+})
+
+gp5d_hepg2_starr_summits_te_ovl_stat <- list(
+  gp5d = process_binomial_testing(gp5d_hepg2_starr_summits_shuf[[1]], gp5d_hepg2_starr_summits_te_ovl_counts[[1]], "subf"),
+  hepg2 = process_binomial_testing(gp5d_hepg2_starr_summits_shuf[[2]], gp5d_hepg2_starr_summits_te_ovl_counts[[2]], "subf")
+)
+
+# Calculating the two-sided Fisher's test to test differential enrichment of TE subfamilies:
+gp5d_hepg2_starr_summits_te_ovl_fisher <- bind_rows(gp5d_hepg2_starr_summits_te_ovl_stat, .id = "line") %>%
+  pivot_wider(id_cols = subf, names_from = line, values_from = c(obs_exp, p_adj, sig, class, n, freq)) %>%
+  rowwise() %>%
+  filter(!is.na(n_hepg2) & !is.na(n_gp5d)) %>%
+  mutate(pval_fisher = fisher.test(matrix(c(n_gp5d, freq_gp5d, n_hepg2, freq_hepg2), nrow = 2))$p.value) %>%
+  ungroup() %>%
+  mutate(
+    padj_fisher = p.adjust(pval_fisher, method = "BH"),
+    fisher_sig = ifelse(padj_fisher < 0.01, class_gp5d, "insig"),
+    lab = ifelse(fisher_sig != "insig", str_extract(subf, "[^\\|]+"), NA)
+  )
+
+# Right panel
+gp5d_hepg2_starr_summits_te_ovl_fisher %>%
+  mutate(lab = ifelse(fisher_sig != "insig", str_extract(subf, "[^\\|]+"), NA)) %>%
+  filter(n_gp5d >= 5 | n_hepg2 >= 5) %>%
+  ggplot(aes(x = obs_exp_hepg2, y = obs_exp_gp5d, fill = factor(fisher_sig), size = factor(fisher_sig), label = lab)) +
+  geom_point(shape = 21) +
+  geom_abline(linetype = "dashed", color = "gray70") +
+  labs(
+    x = "HepG2 STARR-seq peak\nobserved/expected ratio",
+    y = "GP5d STARR-seq peak\nobserved/expected ratio"
+  ) +
+  scale_fill_manual(values = col_pal, name = "TE\nclass", limits = c("LINE", "SINE", "LTR", "DNA")) +
+  scale_size_manual(values = c(rep(1.5, 4), .3), limits = c("LINE", "SINE", "LTR", "DNA", "insig"), guide = "none") +
+  geom_text_repel(size = 2, min.segment.length = .1, max.iter = 10e8, max.time = 5, max.overlaps = 50) +
+  guides(
+    fill = guide_legend(override.aes = list(shape = 21, size = 2)),
+    shape = guide_legend(override.aes = list(size = 2))
+  ) +
+  scale_x_log10(breaks = c(1, 10, 100), expand = c(0, 0), limits = c(.1, 400)) +
+  scale_y_log10(breaks = c(1, 10, 100), expand = c(0, 0), limits = c(.1, 400)) +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_GP5D_STARR_WT_vs_HepG2_TE_enrichment_scatterplot.pdf")
+# ggsave(path, width = 6, height = 4)
+
+# Left panel
+gp5d_hepg2_starr_summits_te_ovl_fisher %>%
+  mutate(
+    fisher_sig = ifelse(padj_fisher > 0.01 & sig_gp5d != "insig" & sig_hepg2 != "insig", class_gp5d, "insig"),
+    lab = ifelse(fisher_sig != "insig", str_extract(subf, "[^\\|]+"), NA)
+  ) %>%
+  filter(n_gp5d >= 5 | n_hepg2 >= 5) %>%
+  ggplot(aes(x = obs_exp_hepg2, y = obs_exp_gp5d, fill = factor(fisher_sig), size = factor(fisher_sig), label = lab)) +
+  geom_point(shape = 21) +
+  geom_abline(linetype = "dashed", color = "gray70") +
+  labs(
+    x = "HepG2 STARR-seq peak\nobserved/expected ratio",
+    y = "GP5d STARR-seq peak\nobserved/expected ratio"
+  ) +
+  scale_fill_manual(values = col_pal, name = "TE\nclass", limits = c("LINE", "SINE", "LTR", "DNA")) +
+  scale_size_manual(values = c(rep(1.5, 4), .3), limits = c("LINE", "SINE", "LTR", "DNA", "insig"), guide = "none") +
+  geom_text_repel(size = 2, min.segment.length = .1, max.iter = 10e8, max.time = 5, max.overlaps = 50) +
+  guides(
+    fill = guide_legend(override.aes = list(shape = 21, size = 2)),
+    shape = guide_legend(override.aes = list(size = 2))
+  ) +
+  scale_x_log10(breaks = c(0, 1, 10, 100), expand = c(0, 0), limits = c(.1, 400)) +
+  scale_y_log10(breaks = c(0, 1, 10, 100), expand = c(0, 0), limits = c(.1, 400)) +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_GP5D_vs_HepG2_NM_TE_common_enrichment_scatterplot.pdf")
+# ggsave(path, width = 6, height = 4)
+```
+
+#### Fig. 3b
+
+```{r fig_3b_read_motifs}
+
+# Common and differentially enriched TE subfamilies from fig. 3a, filtering out the labeled subfamilies:
+enriched_subfs <- list(
+  Common = c("MER50C", "MER61D", "MER61C", "MER61E", "LTR7C", "LTR10D", "LTR10E", "LTR18A", "LTR10B1", "LTR10B2"),
+  HepG2 = c("LTR12_", "LTR12", "LTR12C", "LTR12D", "LTR12F", "MER44B", "MER44C", "MER44D", "MER52A", "MER52C", "MER52D", "LTR10A", "LTR2752"),
+  GP5d = c("MER11A", "MER11B", "MER11C", "MER11D", "LTR14B", "LTR14C", "LTR7", "LTR7B", "LTR7Y", "HSMAR2", "LTR10F", "LTR10C")
+)
+
+# Reading AME motif results of the subfamilies, motif discovery was performed on the TE sequences in each individual subfamily in the common and differential groups
+res <- c(
+  common = "data/meme/Common/220923_ame",
+  hepg2 = "data/meme/HepG2/220923_ame",
+  gp5d = "data/meme/GP5d/220923_ame"
+)
+
+all_motifs <- lapply(seq_along(res), function(i) {
+  file_list <- list.files(res[i], pattern = "ame.tsv", recursive = T, full.names = T)
+  subfs <- str_remove_all(file_list, paste0(res[i], "/|_ame_out/ame.tsv"))
+
+  motifs <- bind_rows(lapply(seq_along(file_list), function(y) {
+    if (subfs[y] %in% enriched_subfs[[i]]) { # Filtering only for the enriched TEs from fig. 3a
+      table <- read_tsv(file_list[y], comment = "#", skip = 1, col_names = ame_cnames)
+      te_subf <- subfs[y]
+
+      if (nrow(table) != 0) {
+        table %>%
+          mutate(subf = te_subf)
+      }
+    }
+  }))
+})
+
+names(all_motifs) <- c("Common", "HepG2", "GP5d")
+```
+
+```{r fig_3b_hepg2_vs_gp5d_vs_common_motif_heatmap}
+
+# Reading in motifs clusters by Vierstra et al. 2020
+vierstra_clusters <- read_tsv("annotations/vierstra_2020_clusters_metadata.tsv")
+
+vierstra_clusters <- vierstra_clusters %>%
+  filter(str_starts(source_id, "MA\\d+")) %>% # Filtering only JASPAR motifs
+  arrange(source_id)
+
+cutoff <- 1e-5 # Cutoff for the adjusted p-value in the motif discovery
+n <- 1 # How many motifs are displayed per subfamily?
+
+# Writing out all motifs for the paper supplement
+# lapply(seq_along(all_motifs), function(i) {
+#   all_motifs[[i]] %>%
+#     left_join(., vierstra_clusters %>% dplyr::select(source_id, cluster), by = c("motif_ID" = "source_id")) %>%
+#     left_join(., motif_classes, by = "motif_ID")
+# }) %>%
+#   bind_rows(., .id = "Enrichment") %>%
+#   dplyr::select(-motif_db) %>%
+#   mutate(sig = ifelse(adj_pval < cutoff, "Significant", "NS"),
+#          Enrichment = ifelse(Enrichment == 1, "Common", ifelse(Enrichment == 2, "HepG2", "GP5d"))) %>%
+#   write_tsv("data/paper_tables/motif_finding_results.tsv")
+
+all_motifs_top <- lapply(seq_along(all_motifs), function(i) {
+  motifs <- all_motifs[[i]] %>%
+    # filter(subf %in% enriched_subfs[[i]]) %>% # Only subfamilies in the plot above
+    filter(adj_pval < cutoff) %>%
+    group_by(subf) %>%
+    arrange(eval, .by_group = T) %>%
+    dplyr::slice(1:n) %>%
+    pull(motif_ID)
+
+  all_motifs[[i]] %>%
+    left_join(., vierstra_clusters %>% dplyr::select(source_id, cluster), by = c("motif_ID" = "source_id")) %>%
+    filter(
+      # subf %in% c(enriched_subfs[[i]]),
+      adj_pval < cutoff,
+      motif_ID %in% vierstra_clusters$source_id
+    ) %>%
+    group_by(subf, cluster) %>%
+    dplyr::summarize(mean_eval = min(eval), tf_comb = paste0(motif_name, collapse = "/")) %>%
+    group_by(subf) %>%
+    arrange(mean_eval) %>%
+    dplyr::slice(1:n) %>%
+    pull(cluster) %>%
+    unique() %>%
+    sort()
+})
+
+gp5d_hepg2_common_motifs_scl_mat <- bind_rows(all_motifs, .id = "line") %>%
+  filter(
+    # subf %in% unlist(enriched_subfs),
+    motif_ID %in% vierstra_clusters$source_id
+  ) %>%
+  left_join(., vierstra_clusters %>% dplyr::select(source_id, cluster), by = c("motif_ID" = "source_id")) %>%
+  filter(cluster %in% unique(unlist(all_motifs_top))) %>%
+  mutate(log10_eval = -log10(eval)) %>%
+  dplyr::select(cluster, motif_name, log10_eval, subf) %>%
+  group_by(cluster) %>%
+  arrange(motif_name) %>%
+  mutate(
+    motif_name_comb = paste0(unique(motif_name), collapse = "/"),
+    motif_name_comb = paste0(cluster, ": ", motif_name_comb)
+  ) %>%
+  group_by(motif_name_comb, subf) %>%
+  dplyr::summarize(log10_eval_mean = mean(log10_eval)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = subf, values_from = log10_eval_mean, values_fill = 0) %>% # In case of several same motifs, taking the smallest log p-value with values_fn
+  mutate(across(2:last_col(), scale.default, center = F)) %>%
+  column_to_rownames("motif_name_comb") %>%
+  as.matrix()
+
+breaks <- seq(min(gp5d_hepg2_common_motifs_scl_mat), max(gp5d_hepg2_common_motifs_scl_mat), length.out = 9)
+
+ht_annotation <- ifelse(colnames(gp5d_hepg2_common_motifs_scl_mat) %in% enriched_subfs$GP5d, "GP5d", ifelse(colnames(gp5d_hepg2_common_motifs_scl_mat) %in% enriched_subfs$HepG2, "HepG2", "Common"))
+
+colnames(gp5d_hepg2_common_motifs_scl_mat) <- str_remove(colnames(gp5d_hepg2_common_motifs_scl_mat), "\\|[:graph:]+\\|[:graph:]+$")
+rownames(gp5d_hepg2_common_motifs_scl_mat) <- str_remove(rownames(gp5d_hepg2_common_motifs_scl_mat), "\\|.+")
+
+# Plotting the actual heatmap with rownames:
+htmp <- Heatmap(gp5d_hepg2_common_motifs_scl_mat,
+  cluster_row_slices = T,
+  show_row_dend = T,
+  cluster_rows = T,
+  cluster_column_slices = F,
+  show_column_dend = T,
+  column_split = ht_annotation,
+  name = "Motif enrichment\nZ-score(-log10(E-value))",
+  col = colorRamp2(breaks, heat_cols_orrd),
+  rect_gp = gpar(col = "black", lwd = .1),
+  heatmap_legend_param = list(
+    color_bar = "continuous",
+    legend_direction = "horizontal",
+    legend_width = unit(8, "cm"),
+    legend_height = unit(5.0, "cm"),
+    title_position = "topcenter",
+    title_gp = gpar(fontsize = 8),
+    labels_gp = gpar(fontsize = 8),
+    border = "black"
+  ),
+
+  # Row (TF) parameters
+  row_names_max_width = unit(40, "cm"),
+  row_title_side = "left",
+  row_title_gp = gpar(fontsize = 8),
+  row_title_rot = 0,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  row_names_side = "right",
+  row_dend_width = unit(25, "mm"),
+  clustering_method_rows = "ward.D2",
+  clustering_method_columns = "ward.D2",
+
+  # Column (subfamily) parameters
+  column_title = "",
+  column_title_side = "top",
+  column_title_gp = gpar(fontsize = 10),
+  column_title_rot = 0,
+  show_column_names = T,
+  column_names_gp = gpar(fontsize = 8),
+  column_names_max_height = unit(10, "cm"),
+  column_dend_height = unit(25, "mm"),
+)
+
+path <- paste0("plots/", today, "_GP5d_HepG2_common_TE_subfs_motifs_heatmap.pdf")
+# pdf(path, height = 6, width = 24)
+draw(htmp, heatmap_legend_side = "bottom")
+# dev.off()
+```
+
+#### Extended data fig. 3a
+
+```{r extended_fig_3a}
+
+regs <- gp5d_hepg2_starr_summits$gp5d[queryHits(gp5d_hepg2_starr_summits_te_ovl$gp5d), ] %>%
+  mutate(
+    te_name = repeatmasker[subjectHits(gp5d_hepg2_starr_summits_te_ovl$gp5d), ]$te_name,
+    full_te_name = repeatmasker[subjectHits(gp5d_hepg2_starr_summits_te_ovl$gp5d), ]$name
+  ) %>%
+  filter(te_name %in% c("MER61C", "MER61D", "LTR10C", "LTR10D", "LTR10E", "LTR14B", "HSMAR2", "MER61E", "LTR10B1", "LTR10B2")) %>% # !full_te_name %in% filt) %>%
+  GRanges() %>%
+  resize(., width = 1000, fix = "center") %>%
+  as_tibble() %>%
+  dplyr::rename(geneid = name, chr = seqnames)
+
+starr_bams <- c(
+  "WT_STARR" = "/data/kzkarttu/gradu/raw_data/GP5D/STARR-seq/WT/new/GP5D_STARR_WT_rmDup_CPmin_MapQ20.bam",
+  "C2_STARR" = "/data/kzkarttu/gradu/raw_data/GP5D/STARR-seq/C2/new/GP5D_STARR_C2_rmDup_CPmin_MapQ20.bam"
+)
+
+counts_starr <- bind_cols(lapply(seq_along(starr_bams), function(i) {
+  f <- file()
+  sink(file = f) ## Silencing the annoying output with sink
+  fc <- featureCounts(starr_bams[i], annot.ext = regs, isPairedEnd = T, nthreads = 60, verbose = F, useMetaFeatures = F)
+  sink() ## undo silencing
+  close(f)
+
+  #### FPKM normalization ####
+  read_n <- sum(fc$stat[, 2]) / 10e6 # Read count in whole library divided by the scaling factor i.e. 1 000 000
+
+  fc <- fc$counts / read_n # RPM normalization
+  fc <- fc / (regs$width / 1000)
+
+  colnames(fc) <- names(starr_bams[i]) # Adding a clean column name, i.e. STARR, ATAC, H3K27ac etc.
+  as_tibble(fc)
+}))
+
+bind_cols(regs, counts_starr) %>%
+  filter(te_name %in% c("MER61C", "MER61D", "LTR10C", "LTR14B", "HSMAR2")) %>%
+  pivot_longer(cols = c(WT_STARR, C2_STARR)) %>%
+  mutate(name = factor(str_remove(name, "_STARR"), levels = c("WT", "C2"))) %>%
+  ggplot(aes(x = name, y = log2(value + 1), fill = name)) +
+  geom_violin(outlier.shape = NA) +
+  geom_point(size = .2, alpha = .5) +
+  geom_line(aes(group = geneid), size = .1, alpha = .3) +
+  facet_grid(~te_name) +
+  stat_compare_means(paired = T) +
+  theme(legend.position = "none") +
+  labs(x = " ", y = "RPKM + 1 (log2)") +
+  scale_y_continuous(limits = c(0, 14))
+
+path <- paste0("plots/", today, "_GP5d_STARR_WT_vs_C2_diff_signal_violinplot.pdf")
+# ggsave(path, width = 6, height = 4)
+
+bind_cols(regs, counts_starr) %>%
+  filter(te_name %in% c("MER61E", "LTR10E", "LTR10D", "LTR10B1", "LTR10B2", "MER50C")) %>%
+  pivot_longer(cols = c(WT_STARR, C2_STARR)) %>%
+  mutate(name = factor(str_remove(name, "_STARR"), levels = c("WT", "C2"))) %>%
+  ggplot(aes(x = name, y = log2(value + 1), fill = name)) +
+  geom_violin(outlier.shape = NA) +
+  geom_point(size = .2, alpha = .5) +
+  geom_line(aes(group = geneid), size = .1, alpha = .3) +
+  facet_grid(~te_name) +
+  stat_compare_means(paired = T) +
+  theme(legend.position = "none") +
+  labs(x = " ", y = "RPKM + 1 (log2)") +
+  scale_y_continuous(limits = c(0, 14))
+
+path <- paste0("plots/", today, "_GP5d_STARR_WT_vs_C2_non_diff_signal_violinplot.pdf")
+# ggsave(path, width = 6, height = 4)
+```
+
+#### Extended data fig. 3b
+
+```{r extended_data_fig_3b_correlation_plot}
+
+labs <- c("MER61C", "MER61E", "MER61D", "LTR10B1", "LTR10B2", "LTR10E")
+
+p53_preds <- read_tsv("annotations/p53_binding_predictions_wang_2007.txt")
+colnames(p53_preds) <- str_replace_all(colnames(p53_preds), "\\/|\\s", "_")
+
+bind_rows(gp5d_hepg2_starr_summits_te_ovl_stat, .id = "line") %>%
+  mutate(te_name = str_extract(subf, "[^\\|]+")) %>%
+  inner_join(., p53_preds, by = c("te_name" = "LTR_ERV")) %>%
+  mutate(lab = ifelse(te_name %in% labs, te_name, NA)) %>%
+  ggplot(aes(x = obs_exp, y = Percentage, fill = line, color = line, label = lab)) +
+  geom_point(shape = 21, color = "black") +
+  geom_text_repel(size = 2.5) +
+  geom_smooth(method = "lm", se = F) +
+  stat_cor() +
+  scale_fill_nejm() +
+  scale_color_nejm() +
+  theme(legend.position = "bottom") +
+  labs(x = "Observed/expected ratio", y = "Percentage of p53 sites in element") +
+  scale_x_continuous(expand = c(0.01, 0.02)) +
+  scale_y_continuous(expand = c(0.01, 0.02))
+
+path <- paste0("plots/", today, "_GP5D_WT_HepG2_p53_binding_correlations.pdf")
+# ggsave(path, height = 5, width = 6)
+```
+
+#### Extended data fig. 3c
+
+```{r extended_data_fig_3c_boxplot}
+te_ages <- read_tsv("annotations/20141105_hg38_TEage_with-nonTE.txt", col_names = c("name", "class", "family", "class_family", "avg_percentage_div", "lineage", "origin"))
+
+# Comparing the ages of ALL the enriched subfamilies:
+
+enriched_subfs <- list(
+  Common = c("AmnSINE1", "L1PBa1", "HERVK11D−int", "LTR10B1", "LTR10B2", "LTR10D", "LTR10E", "LTR18A", "LTR18B", "LTR2", "LTR27B", "LTR2C", "LTR4", "LTR5B", "LTR76", "LTR7C", "LTR88b", "LTR88c", "LTR8B", "MER48", "MER50C", "MER61D", "MER61C", "MER61E", "MLT1H", "MLT1H2"),
+  HepG2 = c("LTR12_", "LTR12", "LTR12C", "LTR12D", "LTR12F", "MER44B", "MER44C", "MER44D", "MER52A", "MER52C", "MER52D", "LTR10A", "LTR2752", "THE1A", "THE1B", "THE1C", "THE1D", "Tigger7", "LTR1A2"),
+  GP5d = c("MER11A", "MER11B", "MER11C", "MER11D", "LTR14B", "LTR14C", "LTR7", "LTR7B", "LTR7Y", "HSMAR2", "LTR10F", "LTR10C", "HSMAR2", "L1PA15-16", "L1PB1", "HERVL-int", "HERV17-int", "MER31A")
+)
+
+gp5d_hepg2_starr_summits_te_ovl_fisher %>%
+  mutate(
+    lab = str_extract(subf, "[^\\|]+"),
+    type = ifelse(lab %in% enriched_subfs$Common, "Common", ifelse(lab %in% enriched_subfs$GP5d | lab %in% enriched_subfs$HepG2, "Differential", NA))
+  ) %>%
+  filter(!is.na(type)) %>%
+  left_join(., te_ages %>% dplyr::select(name, avg_percentage_div, lineage), by = c("lab" = "name")) %>%
+  ggplot(aes(x = type, y = avg_percentage_div, fill = type)) +
+  # geom_point(shape = 21)
+  geom_boxplot() +
+  stat_compare_means(label.x = 1.5, label.y = 30) +
+  theme(
+    axis.title.x = element_blank(),
+    legend.position = "none"
+  ) +
+  labs(y = "TE age (average %div)")
+
+path <- paste0("plots/", today, "_GP5d_HepG2_common_differential_te_ages_boxplot.pdf")
+# ggsave(path, height = 4, width = 3)
+```

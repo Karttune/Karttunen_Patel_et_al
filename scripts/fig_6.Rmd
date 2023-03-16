@@ -1,0 +1,403 @@
+---
+title: "fig_6"
+author: "KonstaK"
+date: "01/02/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  cache.lazy = FALSE,
+  echo = FALSE,
+  fig.height = 4,
+  fig.width = 6,
+  fig.asp = 0.618,
+  fig.show = "show",
+  out.width = "70%",
+  fig.align = "center",
+  fig.path = "plots/pngs/"
+)
+```
+
+#### Loading libraries:
+
+```{r libraries}
+library(tidyverse)
+library(GenomicRanges)
+library(ggrepel)
+
+source("utils/utils.R")
+
+theme_set(theme_bw() +
+  theme(
+    line = element_line(size = unit(0.5, "points")),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    panel.border = element_blank(),
+    axis.text = element_text(color = "black", size = 8),
+    axis.title = element_text(color = "black", size = 10),
+    axis.line = element_line(size = unit(0.5, "pt")),
+    text = element_text(color = "black"),
+    legend.background = element_rect(color = "black", fill = NA, size = 0.5, linetype = "solid")
+  ))
+```
+
+```{r data}
+gp5d_hepg2_starr_summits <- list( # Reading the STARR summits with the clusters:
+  gp5d = bind_rows(lapply(c(
+    "data/kmeans/220804_GP5D_WT_STARR_summits_cluster_1.bed",
+    "data/kmeans/220804_GP5D_WT_STARR_summits_cluster_2.bed",
+    "data/kmeans/220804_GP5D_WT_STARR_summits_cluster_3.bed",
+    "data/kmeans/220804_GP5D_WT_STARR_summits_cluster_4.bed",
+    "data/kmeans/220804_GP5D_WT_STARR_summits_cluster_5.bed"
+  ), read_tsv, col_names = narrowpeak_colnames), .id = "cluster") %>%
+    dplyr::relocate(cluster, .after = name),
+  hepg2 = read_tsv("data/bed/220803_HepG2_STARR_summits_blacklisted_canonical_chrs.bed", col_names = narrowpeak_colnames)
+)
+
+# Reading DEseq2 results for GP5d WT, HepG2 and HCoEpiC
+gp5d_wt_hcoepic_exp_data <- read_tsv("data/counts/220304_GP5D_WT_HCoEpiC_DEseq2_res.tsv", skip = 1, col_names = c("ensid", "basemean", "l2fc_hcoepic", "l2fc_se", "stat", "pval", "padj_hcoepic")) %>%
+  left_join(., gencode_annotation %>% dplyr::select(ensembl_gene_id_version, hgnc_symbol), by = c("ensid" = "ensembl_gene_id_version")) %>%
+  dplyr::rename(hgnc = hgnc_symbol)
+
+gp5d_wt_hepg2_exp_data <- read_tsv("data/counts/220707_GP5D_HepG2_DEseq2_res.tsv", skip = 1, col_names = c("ensid", "basemean", "l2fc_hepg2", "l2fc_se", "stat", "pval", "padj_hepg2")) %>%
+  left_join(., gencode_annotation %>% dplyr::select(ensembl_gene_id_version, hgnc_symbol), by = c("ensid" = "ensembl_gene_id_version")) %>%
+  dplyr::rename(hgnc = hgnc_symbol)
+
+gp5d_wt_c2_exp_data <- read_tsv("data/counts/220308_GP5D_WT_C2_DEseq2_res.tsv", skip = 1, col_names = c("ensid", "basemean", "l2fc_c2", "l2fc_se", "stat", "pval", "padj_c2")) %>%
+  left_join(., gencode_annotation %>% dplyr::select(ensembl_gene_id_version, hgnc_symbol), by = c("ensid" = "ensembl_gene_id_version")) %>%
+  dplyr::rename(hgnc = hgnc_symbol)
+
+# gp5d_counts <- read_tsv("data/counts/220330_GP5D_WT_salmon_TPM.tsv", col_names = c("ensid", "tpm"))
+# hepg2_counts <- read_tsv("data/counts/220520_HepG2_salmon_TPM.tsv", col_names = c("ensid", "tpm"))
+
+# Making a table of the ABC target gene predictions and expression
+gp5d_abc_res <- read_tsv("data/ABC/EnhancerPredictions.txt") %>%
+  left_join(., gp5d_wt_hcoepic_exp_data %>% dplyr::select(ensid, hgnc, l2fc_hcoepic, padj_hcoepic), by = c("TargetGene" = "ensid")) %>%
+  # left_join(., gp5d_counts, by = c("TargetGene" = "ensid")) %>%
+  # dplyr::rename(tpm_gp5d = tpm) %>%
+  left_join(., gp5d_wt_hepg2_exp_data %>% dplyr::select(ensid, l2fc_hepg2, padj_hepg2), by = c("TargetGene" = "ensid")) %>%
+  left_join(., gp5d_wt_c2_exp_data %>% dplyr::select(ensid, l2fc_c2, padj_c2), by = c("TargetGene" = "ensid")) %>%
+  mutate(
+    sig_hepg2 = ifelse(abs(l2fc_hepg2) > 1.2 & padj_hepg2 < 0.05, "sig", "NS"),
+    sig_hcoepic = ifelse(abs(l2fc_hcoepic) > 1.2 & padj_hcoepic < 0.05, "sig", "NS"),
+    sig_c2 = ifelse(abs(l2fc_c2) > 1.2 & padj_c2 < 0.05, "sig", "NS")
+  ) %>%
+  # left_join(., hepg2_counts, by = c("TargetGene" = "ensid")) %>%
+  # dplyr::rename(tpm_hepg2 = tpm) %>%
+  arrange(chr, start) %>%
+  dplyr::rename(target_ensid = TargetGene, abc_score = ABC.Score)
+```
+
+```{r processing}
+
+# Only taking predicted contacts that overlap a STARR-seq peak summit and Making a single table from GP5d overlaps of ABC predicted regions
+starr_abc_res_ovl <- findOverlaps(GRanges(gp5d_hepg2_starr_summits$gp5d), GRanges(gp5d_abc_res))
+
+starr_abc_ovls <- gp5d_abc_res[subjectHits(starr_abc_res_ovl), ] %>%
+  bind_cols(., gp5d_hepg2_starr_summits$gp5d[queryHits(starr_abc_res_ovl), ] %>% dplyr::select(seqnames, start, end, name, score, cluster) %>% dplyr::rename(starr_seqnames = seqnames, starr_start = start, starr_end = end, starr_peak = name))
+
+starr_te_ovl <- findOverlaps(GRanges(gp5d_hepg2_starr_summits$gp5d), subject = repeatmasker_gr, ignore.strand = T)
+
+starr_te_ovl_pks <- gp5d_hepg2_starr_summits$gp5d[queryHits(starr_te_ovl), ] %>%
+  dplyr::select(seqnames, start, end, name) %>% 
+  dplyr::rename(starr_peak = name, starr_seqnames = seqnames, starr_start = start, starr_end = end) %>%
+  bind_cols(., repeatmasker[subjectHits(starr_te_ovl), ]) %>% 
+  dplyr::rename(te_seqnames = seqnames, te_start = start, te_end = end) %>% 
+  # dplyr::select(starr_peak, name, te_name, te_seqnames, te_start, te_end, subf, strand, class) %>%
+  dplyr::select(-score, -strand) %>% 
+  dplyr::rename(full_te_name = name)
+  
+starr_pks_abc_te_ovls <- starr_abc_ovls %>%
+  # full_join(bind_rows(starr_te_ovl_pks), ., by = c("starr_peak" = "peak")) %>%
+  right_join(starr_te_ovl_pks, ., by = c("starr_seqnames", "starr_start", "starr_end", "starr_peak")) %>% 
+  dplyr::select(-chr, -start, -end, -CellType) %>% 
+  group_by(full_te_name) %>% 
+  mutate(gene_target_n = n(),
+         dist_to_gene = abs(TargetGeneTSS - starr_start)) %>% 
+  ungroup()
+
+```
+
+#### Fig. 6a
+
+```{r fig_6a_mer11_expression_boxplot}
+
+starr_pks_abc_te_ovls %>%
+  dplyr::select(l2fc_hepg2, sig_hepg2, subf, te_name, hgnc) %>%
+  filter(subf %in% c("MER11A|ERVK|LTR", "MER11B|ERVK|LTR", "MER11C|ERVK|LTR", "MER11D|ERVK|LTR")) %>%
+  mutate(lab = ifelse(sig_hepg2 == "sig", hgnc, NA)) %>%
+  filter(!is.na(sig_hepg2)) %>%
+  distinct() %>% # Removing duplicate genes (i.e. genes with more than 1 contact)
+  ggplot(aes(x = l2fc_hepg2, y = te_name, label = lab)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(shape = 21, alpha = .7, aes(size = sig_hepg2, fill = sig_hepg2), position = position_jitter(seed = 1)) +
+  geom_text_repel(size = 3, position = position_jitter(seed = 1), max.iter = 10e7, force = 25, max.time = 3, min.segment.length = .1) +
+  geom_vline(xintercept = c(-1.2, 0, 1.2), alpha = .5, linetype = "dashed", color = "gray40") +
+  scale_fill_manual(values = rev(pal_nejm("default")(2)), name = "Significance") +
+  scale_size_manual(values = c(1, 2)) +
+  labs(x = "Fold change (log2)", y = "TE subfamily") +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_GP5D_vs_HepG2_MER11_enriched_TEs_peak_contacts.pdf")
+# ggsave(path, width = 6, height = 4)
+```
+
+#### Fig. 6b
+
+```{r fig_6b_p53re_expession_boxplot}
+
+p53_subfs <- c("MER61C|ERV1|LTR", "MER61D|ERV1|LTR", "MER61E|ERV1|LTR", "LTR10E|ERV1|LTR", "LTR10D|ERV1|LTR", "LTR10B1|ERV1|LTR", "LTR10B2|ERV1|LTR")
+
+# GP5d WT vs HepG2, p53-specific genes:
+starr_pks_abc_te_ovls %>%
+  dplyr::select(l2fc_hepg2, sig_hepg2, subf, te_name, hgnc) %>%
+  mutate(lab = ifelse(sig_hepg2 == "sig", hgnc, NA)) %>%
+  filter(subf %in% p53_subfs, !is.na(sig_hepg2)) %>%
+  distinct() %>%
+  ggplot(aes(x = l2fc_hepg2, y = te_name, label = lab)) +
+  # geom_violin() +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(shape = 21, alpha = .7, aes(size = sig_hepg2, fill = sig_hepg2), position = position_jitter(seed = 1)) +
+  geom_text_repel(size = 3, position = position_jitter(seed = 1)) +
+  geom_vline(xintercept = c(-1.2, 0, 1.2), alpha = .5, linetype = "dashed", color = "gray40") +
+  scale_fill_manual(values = rev(pal_nejm("default")(2)), name = "Significance") +
+  scale_size_manual(values = c(1, 2)) +
+  labs(x = "Fold change (log2)", y = "TE subfamily") +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_GP5d_vs_HepG2_p53_enriched_TEs_peak_contacts.pdf")
+# ggsave(path, width = 6, height = 4)
+```
+
+#### Extended data fig. 7a
+
+```{r extended_data_fig_7a_te_ovl_contact_barplot}
+# How many peaks in each cluster?
+cl_n <- gp5d_hepg2_starr_summits$gp5d %>%
+  group_by(cluster) %>%
+  dplyr::summarize(n = dplyr::n())
+
+# Overlaps with ABC peaks (contacts)
+cl_ovl <- starr_abc_ovls %>%
+  filter(CellType == "GP5d") %>%
+  dplyr::select(starr_peak, cluster) %>%
+  distinct() %>%
+  group_by(cluster) %>%
+  dplyr::summarize(n = dplyr::n())
+
+cl_n$n <- cl_n$n - cl_ovl$n # Subtracting the overlapped peaks from all peak counts
+
+bind_rows(cl_ovl, cl_n) %>%
+  mutate(abc_ovl = c(rep("Contact", 5), rep("No contact", 5))) %>%
+  ggplot(aes(x = cluster, y = n, fill = abc_ovl)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  scale_fill_manual(values = brewer.pal(2, "Set2"), name = "STARR peak summit\nwith a contact") +
+  scale_y_continuous(expand = c(0.001, 0.001))
+
+path <- paste0("plots/", today, "_GP5D_cluster_peaks_contact_n.pdf")
+# ggsave(path, height = 3, width = 5)
+```
+
+#### Extended data fig. 7b
+
+```{r extended_fig_7b_mer11_expession_boxplot}
+
+starr_pks_abc_te_ovls %>%
+  dplyr::select(l2fc_hcoepic, sig_hcoepic, subf, te_name, hgnc) %>%
+  filter(subf %in% c("MER11A|ERVK|LTR", "MER11B|ERVK|LTR", "MER11C|ERVK|LTR", "MER11D|ERVK|LTR")) %>%
+  mutate(lab = ifelse(sig_hcoepic == "sig", hgnc, NA)) %>%
+  filter(!is.na(sig_hcoepic)) %>%
+  distinct() %>% # Removing duplicate genes (i.e. genes with more than 1 contact)
+  ggplot(aes(x = l2fc_hcoepic, y = te_name, label = lab)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(shape = 21, alpha = .7, aes(size = sig_hcoepic, fill = sig_hcoepic), position = position_jitter(seed = 1)) +
+  geom_text_repel(size = 3, position = position_jitter(seed = 1), max.iter = 10e7, force = 25, max.time = 3, min.segment.length = .1) +
+  geom_vline(xintercept = c(-1.2, 0, 1.2), alpha = .5, linetype = "dashed", color = "gray40") +
+  scale_fill_manual(values = rev(pal_nejm("default")(2)), name = "Significance") +
+  scale_size_manual(values = c(1, 2)) +
+  labs(x = "Fold change (log2)", y = "TE subfamily") +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_GP5D_vs_HepG2_MER11_enriched_TEs_peak_contacts.pdf")
+# ggsave(path, width = 6, height = 4)
+```
+
+#### Extended data fig. 7c
+
+```{r extended_fig_7c_p53re_expession_boxplot}
+
+p53_subfs <- c("MER61C|ERV1|LTR", "MER61D|ERV1|LTR", "MER61E|ERV1|LTR", "LTR10E|ERV1|LTR", "LTR10D|ERV1|LTR", "LTR10B1|ERV1|LTR", "LTR10B2|ERV1|LTR")
+
+# GP5d WT vs HepG2, p53-specific genes:
+starr_pks_abc_te_ovls %>%
+  dplyr::select(l2fc_c2, sig_c2, subf, te_name, hgnc) %>%
+  mutate(lab = ifelse(sig_c2 == "sig", hgnc, NA)) %>%
+  filter(subf %in% p53_subfs, !is.na(sig_c2)) %>%
+  distinct() %>%
+  ggplot(aes(x = l2fc_c2, y = te_name, label = lab)) +
+  # geom_violin() +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(shape = 21, alpha = .7, aes(size = sig_c2, fill = sig_c2), position = position_jitter(seed = 1)) +
+  geom_text_repel(size = 3, position = position_jitter(seed = 1)) +
+  geom_vline(xintercept = c(-1.2, 0, 1.2), alpha = .5, linetype = "dashed", color = "gray40") +
+  scale_fill_manual(values = rev(pal_nejm("default")(2)), name = "Significance") +
+  scale_size_manual(values = c(1, 2)) +
+  labs(x = "Fold change (log2)", y = "TE subfamily") +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_GP5d_WT_vs_GP5d_p53null_p53_enriched_TEs_peak_contacts.pdf")
+# ggsave(path, width = 6, height = 4)
+```
+
+#### Selecting MER11 loci and genes for CRISPRi targeting
+
+```{r CRISPRi_target_selection}
+
+starr_pks_abc_te_ovls %>% 
+  filter(str_detect(te_name, "MER11[ABCD]"),
+         !is.na(hgnc),
+         !str_detect(hgnc, "AC\\d+\\.\\d+")) %>% 
+  arrange(desc(gene_target_n)) %>% 
+  group_by(full_te_name) %>%   
+  arrange(dist_to_gene, .by_group = T) %>% 
+  mutate(closest_gene = first(hgnc)) %>% 
+  dplyr::slice(1) %>% 
+  arrange(desc(score)) %>% 
+  ungroup() #%>% 
+  # slice_head(n = 50) %>% 
+  # write_tsv("230227_GP5d_MER11ABC_CRISPRi_candidate_list.tsv")
+
+```
+
+#### Testing fgsea
+
+```{r}
+library(fgsea)
+
+pathway <- fgsea::gmtPathways("/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/gsea_pathways/h.all.v2023.1.Hs.symbols.gmt")
+
+mer11_targets <- starr_pks_abc_te_ovls %>% 
+  filter(str_detect(te_name, "MER11[ABCD]")) %>% 
+  dplyr::select(hgnc, l2fc_hcoepic) %>% 
+  arrange(l2fc_hcoepic) %>% 
+  na.omit() %>% 
+  pull(l2fc_hcoepic, name = hgnc)
+
+mer11_targets_gsea <- GSEA(mer11_targets, "/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/gsea_pathways/h.all.v2023.1.Hs.symbols.gmt", 0.05)
+
+```
+
+
+```{r}
+cl_1_targets <- starr_pks_abc_te_ovls %>% 
+  filter(cluster == 1) %>% 
+  dplyr::select(hgnc, l2fc_hcoepic) %>% 
+  distinct() %>% 
+  arrange(l2fc_hcoepic) %>% 
+  na.omit() %>% 
+  pull(l2fc_hcoepic, name = hgnc)
+
+cl_1_targets_gsea <- GSEA(cl_1_targets, "/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/gsea_pathways/h.all.v2023.1.Hs.symbols.gmt", 0.05)
+```
+
+
+```{r}
+cl_1_te_targets <- starr_pks_abc_te_ovls %>% 
+  filter(cluster == 1, !is.na(te_name)) %>% 
+  dplyr::select(hgnc, l2fc_hcoepic) %>% 
+  distinct() %>% 
+  na.omit() %>% 
+  filter(hgnc != "Y_RNA") %>% 
+  arrange(l2fc_hcoepic) %>% 
+  pull(l2fc_hcoepic, name = hgnc)
+
+cl_1_te_targets_gsea <- GSEA(cl_1_te_targets, "/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/gsea_pathways/h.all.v2023.1.Hs.symbols.gmt", 0.05)
+```
+
+```{r}
+
+# mer11a_starr_ovl <- repeatmasker[subjectHits(starr_te_ovl), ] %>% 
+#   filter(te_name == "MER11A") %>% 
+#   arrange(seqnames, start) %>% 
+#   write_tsv("/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/te_subfs/GP5d/MER11_background_test/GP5d_mer11_starr_ovls.bed", col_names = F)
+# 
+# repeatmasker %>% 
+#   filter(te_name == "MER11A") %>% 
+#   filter(!name %in% mer11a_starr_ovl$name) %>% 
+#   arrange(seqnames, start) %>% 
+#   write_tsv("/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/te_subfs/GP5d/MER11_background_test/GP5d_mer11_background.bed", col_names = F)
+  
+```
+
+```{r}
+GSEA <- function(gene_list, GO_file, pval) {
+  set.seed(54321)
+
+  if (any(duplicated(names(gene_list)))) {
+    warning("Duplicates in gene names")
+    gene_list <- gene_list[!duplicated(names(gene_list))]
+  }
+  if (!all(order(gene_list, decreasing = TRUE) == 1:length(gene_list))) {
+    warning("Gene list not sorted")
+    gene_list <- sort(gene_list, decreasing = TRUE)
+  }
+  myGO <- fgsea::gmtPathways(GO_file)
+
+  fgRes <- fgsea::fgsea(
+    pathways = myGO,
+    stats = gene_list,
+    minSize = 15, ## minimum gene set size
+    maxSize = 400, ## maximum gene set size
+    nperm = 10000
+  ) %>%
+    as.data.frame() %>%
+    dplyr::filter(padj < !!pval) %>%
+    arrange(desc(NES))
+  message(paste("Number of signficant gene sets =", nrow(fgRes)))
+
+  message("Collapsing Pathways -----")
+  concise_pathways <- collapsePathways(data.table::as.data.table(fgRes),
+    pathways = myGO,
+    stats = gene_list
+  )
+  fgRes <- fgRes[fgRes$pathway %in% concise_pathways$mainPathways, ]
+  message(paste("Number of gene sets after collapsing =", nrow(fgRes)))
+
+  fgRes$Enrichment <- ifelse(fgRes$NES > 0, "Up-regulated", "Down-regulated")
+  filtRes <- rbind(
+    head(fgRes, n = 10),
+    tail(fgRes, n = 10)
+  )
+
+  total_up <- sum(fgRes$Enrichment == "Up-regulated")
+  total_down <- sum(fgRes$Enrichment == "Down-regulated")
+  header <- paste0("Top 10 (Total pathways: Up=", total_up, ", Down=", total_down, ")")
+
+  colos <- setNames(
+    c("firebrick2", "dodgerblue2"),
+    c("Up-regulated", "Down-regulated")
+  )
+
+  g1 <- ggplot(filtRes, aes(reorder(pathway, NES), NES)) +
+    geom_point(aes(fill = Enrichment, size = size), shape = 21) +
+    scale_fill_manual(values = colos) +
+    scale_size_continuous(range = c(2, 10)) +
+    geom_hline(yintercept = 0) +
+    coord_flip() +
+    labs(
+      x = "Pathway", y = "Normalized Enrichment Score",
+      title = header
+    )
+    
+
+  output <- list("Results" = fgRes, "Plot" = g1)
+  return(output)
+}
+```
+
+

@@ -1,0 +1,128 @@
+---
+title: "RNA_seq_processing"
+author: "KonstaK"
+date: "3/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  cache.lazy = FALSE,
+  echo = FALSE,
+  fig.height = 4,
+  fig.width = 6,
+  fig.asp = 0.618,
+  fig.show = "show",
+  out.width = "70%",
+  fig.align = "center",
+  fig.path = "plots/pngs/"
+)
+```
+
+```{r load_libraries}
+library(tidyverse)
+library(DESeq2)
+```
+
+### DESeq2 analysis
+
+#### Running DESeq2 for GP5D WT vs HCoEpiC
+
+```{r GP5D_WT_vs_HCoEpiC}
+runDeseq = function(data, groups, ref) {
+
+  # Set up the conditions
+  sampleInfo <- data.frame(groups, row.names=colnames(data))
+
+  # data_filtered <- data[apply(data, 1, function(x){max(x)}) > 1, ]
+  dds <- DESeqDataSetFromMatrix(countData = data, colData = sampleInfo, design = ~ groups)
+  dds$groups = relevel(dds$groups, ref = ref)
+  dds <- DESeq(dds)
+
+  return(dds)
+}
+
+counts <- read_tsv("data/counts/GP5D_WT_C2_HCoEpiC_gencode_v36_featureCounts.txt", comment = "#", skip = 2, col_types = "c____iiiiiiiii", col_names = c("ensid", "length", "WT_1", "WT_2", "WT_3", "C2_1", "C2_2", "C2_3", "HCoEpiC_1", "HCoEpiC_2", "HCoEpiC_3"))
+
+deseq_data <- runDeseq(counts %>% column_to_rownames("ensid") %>% dplyr::select(-length, -C2_1, -C2_2, -C2_3), c(rep("GP5D_WT", 3), rep("HCoEpiC", 3)), "HCoEpiC")
+counts <- counts(deseq_data)
+
+res <- results(deseq_data)
+
+as.data.frame(res) %>% 
+  rownames_to_column("ensid") %>% 
+  write_tsv("data/counts/220304_GP5D_WT_HCoEpiC_DEseq2_res.tsv")
+```
+
+#### Running DESeq2 for GP5D WT vs C2
+
+```{r GP5D_WT_vs_C2}
+counts <- read_tsv("data/counts/GP5D_WT_C2_HCoEpiC_gencode_v36_featureCounts.txt", comment = "#", skip = 2, col_types = "c____iiiiiiiii", col_names = c("ensid", "length", "WT_1", "WT_2", "WT_3", "C2_1", "C2_2", "C2_3", "HCoEpiC_1", "HCoEpiC_2", "HCoEpiC_3"))
+
+deseq_data <- runDeseq(counts %>% column_to_rownames("ensid") %>% dplyr::select(-length, -HCoEpiC_1, -HCoEpiC_2, -HCoEpiC_3), c(rep("GP5D_WT", 3), rep("GP5D_C2", 3)), "GP5D_C2")
+
+res <- results(deseq_data)
+
+as.data.frame(res) %>% 
+  rownames_to_column("ensid") %>% 
+  write_tsv("data/counts/220308_GP5D_WT_C2_DEseq2_res.tsv")
+```
+
+#### Running DESeq2 for GP5D WT vs HepG2
+
+```{r GP5D_WT_vs_HepG2}
+counts <- read_tsv("data/counts/GP5D_WT_HepG2_gencode_v36_featureCounts.txt", comment = "#", skip = 2, col_types = "c____iiiiiiiii", col_names = c("ensid", "length", "GP5D_1", "GP5D_2", "GP5D_3", "HepG2_1", "HepG2_2", "HepG2_3"))
+
+deseq_data <- runDeseq(counts %>% column_to_rownames("ensid") %>% dplyr::select(-length), c(rep("GP5D_WT", 3), rep("HepG2", 3)), "HepG2")
+
+res <- results(deseq_data)
+
+as.data.frame(res) %>% 
+  rownames_to_column("ensid") %>% 
+  write_tsv("data/counts/220707_GP5D_HepG2_DEseq2_res.tsv")
+
+```
+
+#### Salmon TPM counts for GP5D WT and HepG2 to disc, to be used in ABC
+
+```{r salmon_exp}
+read_tsv(list.files("data/salmon/GP5D", pattern = "quant.genes.sf", full.names = T, recursive = T)) %>% 
+  group_by(Name) %>% 
+  dplyr::select(Name, TPM) %>% 
+  dplyr::summarize(TPM = mean(TPM)) %>% 
+  #write_tsv("data/counts/220330_GP5D_WT_salmon_TPM.tsv", col_names = F)
+
+read_tsv(list.files("data/salmon/HepG2", pattern = "quant.genes.sf", full.names = T, recursive = T)) %>% 
+  group_by(Name) %>% 
+  dplyr::select(Name, TPM) %>% 
+  dplyr::summarize(TPM = mean(TPM)) #%>% 
+  #write_tsv("data/counts/220520_HepG2_salmon_TPM.tsv", col_names = F)
+
+```
+
+#### Salmon count tables for GEO submission:
+
+```{r}
+
+# read_tsv(list.files("/data/kzkarttu/gradu/raw_data/GP5D/RNA-seq/WT", pattern = "quant.genes.sf", full.names = T, recursive = T)) %>% 
+#   group_by(Name) %>% 
+#   dplyr::select(Name, TPM) %>% 
+#   dplyr::summarize(TPM = mean(TPM)) %>% 
+#   write_tsv("/data/kzkarttu/manuscript/processed_data/GP5d_WT_salmon_TPM.txt")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
