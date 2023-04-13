@@ -32,7 +32,9 @@ The script calculates the STARR-seq peak summit enrichment at TE classes lineage
 #### Required additional packages for Fig_1.rmd:
 
 bedtoolsr 2.29.0-3
+
 rstatix 0.7.1
+
 UpSetR 1.4.0
 
 ## Figure 2.
@@ -43,15 +45,25 @@ The kmeans-clustering file required for the script is created with utils/kmeans-
 #### Required additional packages for Fig_2.rmd:
 
 bedtoolsr 2.29.0-3
+
 BiocParallel 1.26.2
+
 ChIPseeker 1.28.3
+
 circlize 0.4.15
+
 data.table 1.14.4
+
 EnrichedHeatmap 1.22.0
+
 ggpubr 0.4.0
+
 matrixStats 0.62.0
+
 rstatix 0.7.1
+
 rtracklayer 1.52.1
+
 TxDb.Hsapiens.UCSC.hg38.knownGene 3.13.0
 
 ## Figure 3.
@@ -61,10 +73,15 @@ The script calculates the TE subfamily enrichment in GP5d and HepG2 and creates 
 #### Required additional packages for Fig_3.rmd:
 
 bedtoolsr 2.29.0-3
+
 circlize 0.4.15
+
 ComplexHeatmap 2.8.0
+
 ggpubr 0.4.0
+
 rstatix 0.7.1
+
 Rsubread 2.6.4
 
 ## Figure 5.
@@ -74,7 +91,9 @@ The script calculates the HepG2 non-methylated vs. methylated STARR-seq enrichme
 #### Required additional packages for Fig_5.rmd:
 
 bsseq 1.28.0
+
 ggpubr 0.4.0
+
 Rsubread 2.6.4
 
 ## Figure 6.
