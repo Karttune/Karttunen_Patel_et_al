@@ -96,6 +96,16 @@ ggpubr 0.4.0
 
 Rsubread 2.6.4
 
+## Extended Data Fig. 5
+
+This is a separate script for creating the figures in Extended Data Fig. 5. 
+
+#### Required additional packages for Extended_data_fig_5.rmd:
+
+circlize 0.4.15
+
+ComplexHeatmap 2.8.0
+
 ## Figure 6.
 Fig_6.rmd contains the R code to reproduce fig. 6a, b, Extended data fig. 7a, b, and c.
 The script processes the ABC and DEseq2 output data and creates the boxplots of TE contact gene expression.
