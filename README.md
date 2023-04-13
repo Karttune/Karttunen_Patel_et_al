@@ -11,11 +11,17 @@ All scripts have been tested on R 4.1.2 on Ubuntu 18.04.6 LTS.
 #### All scripts require the following R packages:
 
 GenomicRanges_1.44.0
+
 ggrepel_0.9.2
+
 ggsci 2.9
+
 RColorBrewer 1.1-3
+
 soGGi 1.24.1
+
 tidyverse 1.3.2
+
 wesanderson 0.3.6
 
 
