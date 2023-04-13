@@ -98,7 +98,7 @@ Rsubread 2.6.4
 
 ## Extended Data Fig. 5
 
-This is a separate script for creating the figures in Extended Data Fig. 5. The cancer-specific TCGA ATAC peak data for the 23 cancer types were downloaded from https://api.gdc.cancer.gov/data/.
+This is a separate script for creating the figures in Extended Data Fig. 5. The cancer-specific TCGA ATAC peak data for the 23 cancer types were downloaded from https://gdc.cancer.gov/about-data/publications/ATACseq-AWG.
 
 #### Required additional packages for Extended_data_fig_5.rmd:
 
