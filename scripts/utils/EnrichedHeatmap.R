@@ -17,6 +17,7 @@
 
 suppressPackageStartupMessages({
   library(BiocParallel)
+  library(parallel)
   library(EnrichedHeatmap)
   library(rtracklayer)
   library(circlize)

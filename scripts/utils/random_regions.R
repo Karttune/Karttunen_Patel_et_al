@@ -1,5 +1,6 @@
 library(bedtoolsr)
 library(rstatix)
+library(parallel)
 
 chrom_sizes <- "annotations/hg38.canonical.chrom.sizes"
 mask <- "annotations/BSgenome_hg38_mask.bed"
@@ -7,7 +8,7 @@ mask <- "annotations/BSgenome_hg38_mask.bed"
 # Setting the seed to the same value for each run for reproducibility
 seeds <- c(1000:1999)
 
-shuffle_random_regions <- function(peak_path, n, rmsk, level = "subfamily", cores_n = 40) {
+shuffle_random_regions <- function(peak_path, n, rmsk, level = "subfamily", cores_n = 60) {
   cores <- cores_n
 
   if (level == "subfamily") {

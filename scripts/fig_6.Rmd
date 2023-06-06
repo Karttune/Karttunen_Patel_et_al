@@ -121,6 +121,10 @@ starr_pks_abc_te_ovls <- starr_abc_ovls %>%
          dist_to_gene = abs(TargetGeneTSS - starr_start)) %>% 
   ungroup()
 
+# Writing the table for supplements
+# starr_pks_abc_te_ovls %>% 
+#   write_tsv("/data/kzkarttu/paper/supplements_gp5d_abc_starr_te.tsv")
+
 ```
 
 #### Fig. 6a
@@ -145,6 +149,7 @@ starr_pks_abc_te_ovls %>%
 
 path <- paste0("plots/", today, "_GP5D_vs_HepG2_MER11_enriched_TEs_peak_contacts.pdf")
 # ggsave(path, width = 6, height = 4)
+
 ```
 
 #### Fig. 6b
@@ -174,7 +179,7 @@ path <- paste0("plots/", today, "_GP5d_vs_HepG2_p53_enriched_TEs_peak_contacts.p
 # ggsave(path, width = 6, height = 4)
 ```
 
-#### Extended data fig. 7a
+#### Extended data fig. 9a
 
 ```{r extended_data_fig_7a_te_ovl_contact_barplot}
 # How many peaks in each cluster?
@@ -203,7 +208,7 @@ path <- paste0("plots/", today, "_GP5D_cluster_peaks_contact_n.pdf")
 # ggsave(path, height = 3, width = 5)
 ```
 
-#### Extended data fig. 7b
+#### Extended data fig. 9b
 
 ```{r extended_fig_7b_mer11_expession_boxplot}
 
@@ -227,7 +232,7 @@ path <- paste0("plots/", today, "_GP5D_vs_HepG2_MER11_enriched_TEs_peak_contacts
 # ggsave(path, width = 6, height = 4)
 ```
 
-#### Extended data fig. 7c
+#### Extended data fig. 9c
 
 ```{r extended_fig_7c_p53re_expession_boxplot}
 
@@ -254,150 +259,22 @@ path <- paste0("plots/", today, "_GP5d_WT_vs_GP5d_p53null_p53_enriched_TEs_peak_
 # ggsave(path, width = 6, height = 4)
 ```
 
-#### Selecting MER11 loci and genes for CRISPRi targeting
+#### Selecting MER11 loci and genes for CRISPR targeting
 
-```{r CRISPRi_target_selection}
+```{r CRISPR_target_selection}
 
-starr_pks_abc_te_ovls %>% 
-  filter(str_detect(te_name, "MER11[ABCD]"),
-         !is.na(hgnc),
-         !str_detect(hgnc, "AC\\d+\\.\\d+")) %>% 
-  arrange(desc(gene_target_n)) %>% 
-  group_by(full_te_name) %>%   
-  arrange(dist_to_gene, .by_group = T) %>% 
-  mutate(closest_gene = first(hgnc)) %>% 
-  dplyr::slice(1) %>% 
-  arrange(desc(score)) %>% 
-  ungroup() #%>% 
+# starr_pks_abc_te_ovls %>% 
+#   filter(str_detect(te_name, "MER11[ABCD]"),
+#          !is.na(hgnc),
+#          !str_detect(hgnc, "AC\\d+\\.\\d+")) %>% 
+#   arrange(desc(gene_target_n)) %>% 
+#   group_by(full_te_name) %>%   
+#   arrange(dist_to_gene, .by_group = T) %>% 
+#   mutate(closest_gene = first(hgnc)) %>% 
+#   dplyr::slice(1) %>% 
+#   arrange(desc(score)) %>% 
+#   ungroup() #%>% 
   # slice_head(n = 50) %>% 
-  # write_tsv("230227_GP5d_MER11ABC_CRISPRi_candidate_list.tsv")
+  # write_tsv("230227_GP5d_MER11ABC_CRISPR_candidate_list.tsv")
 
 ```
-
-#### Testing fgsea
-
-```{r}
-library(fgsea)
-
-pathway <- fgsea::gmtPathways("/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/gsea_pathways/h.all.v2023.1.Hs.symbols.gmt")
-
-mer11_targets <- starr_pks_abc_te_ovls %>% 
-  filter(str_detect(te_name, "MER11[ABCD]")) %>% 
-  dplyr::select(hgnc, l2fc_hcoepic) %>% 
-  arrange(l2fc_hcoepic) %>% 
-  na.omit() %>% 
-  pull(l2fc_hcoepic, name = hgnc)
-
-mer11_targets_gsea <- GSEA(mer11_targets, "/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/gsea_pathways/h.all.v2023.1.Hs.symbols.gmt", 0.05)
-
-```
-
-
-```{r}
-cl_1_targets <- starr_pks_abc_te_ovls %>% 
-  filter(cluster == 1) %>% 
-  dplyr::select(hgnc, l2fc_hcoepic) %>% 
-  distinct() %>% 
-  arrange(l2fc_hcoepic) %>% 
-  na.omit() %>% 
-  pull(l2fc_hcoepic, name = hgnc)
-
-cl_1_targets_gsea <- GSEA(cl_1_targets, "/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/gsea_pathways/h.all.v2023.1.Hs.symbols.gmt", 0.05)
-```
-
-
-```{r}
-cl_1_te_targets <- starr_pks_abc_te_ovls %>% 
-  filter(cluster == 1, !is.na(te_name)) %>% 
-  dplyr::select(hgnc, l2fc_hcoepic) %>% 
-  distinct() %>% 
-  na.omit() %>% 
-  filter(hgnc != "Y_RNA") %>% 
-  arrange(l2fc_hcoepic) %>% 
-  pull(l2fc_hcoepic, name = hgnc)
-
-cl_1_te_targets_gsea <- GSEA(cl_1_te_targets, "/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/gsea_pathways/h.all.v2023.1.Hs.symbols.gmt", 0.05)
-```
-
-```{r}
-
-# mer11a_starr_ovl <- repeatmasker[subjectHits(starr_te_ovl), ] %>% 
-#   filter(te_name == "MER11A") %>% 
-#   arrange(seqnames, start) %>% 
-#   write_tsv("/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/te_subfs/GP5d/MER11_background_test/GP5d_mer11_starr_ovls.bed", col_names = F)
-# 
-# repeatmasker %>% 
-#   filter(te_name == "MER11A") %>% 
-#   filter(!name %in% mer11a_starr_ovl$name) %>% 
-#   arrange(seqnames, start) %>% 
-#   write_tsv("/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/te_subfs/GP5d/MER11_background_test/GP5d_mer11_background.bed", col_names = F)
-  
-```
-
-```{r}
-GSEA <- function(gene_list, GO_file, pval) {
-  set.seed(54321)
-
-  if (any(duplicated(names(gene_list)))) {
-    warning("Duplicates in gene names")
-    gene_list <- gene_list[!duplicated(names(gene_list))]
-  }
-  if (!all(order(gene_list, decreasing = TRUE) == 1:length(gene_list))) {
-    warning("Gene list not sorted")
-    gene_list <- sort(gene_list, decreasing = TRUE)
-  }
-  myGO <- fgsea::gmtPathways(GO_file)
-
-  fgRes <- fgsea::fgsea(
-    pathways = myGO,
-    stats = gene_list,
-    minSize = 15, ## minimum gene set size
-    maxSize = 400, ## maximum gene set size
-    nperm = 10000
-  ) %>%
-    as.data.frame() %>%
-    dplyr::filter(padj < !!pval) %>%
-    arrange(desc(NES))
-  message(paste("Number of signficant gene sets =", nrow(fgRes)))
-
-  message("Collapsing Pathways -----")
-  concise_pathways <- collapsePathways(data.table::as.data.table(fgRes),
-    pathways = myGO,
-    stats = gene_list
-  )
-  fgRes <- fgRes[fgRes$pathway %in% concise_pathways$mainPathways, ]
-  message(paste("Number of gene sets after collapsing =", nrow(fgRes)))
-
-  fgRes$Enrichment <- ifelse(fgRes$NES > 0, "Up-regulated", "Down-regulated")
-  filtRes <- rbind(
-    head(fgRes, n = 10),
-    tail(fgRes, n = 10)
-  )
-
-  total_up <- sum(fgRes$Enrichment == "Up-regulated")
-  total_down <- sum(fgRes$Enrichment == "Down-regulated")
-  header <- paste0("Top 10 (Total pathways: Up=", total_up, ", Down=", total_down, ")")
-
-  colos <- setNames(
-    c("firebrick2", "dodgerblue2"),
-    c("Up-regulated", "Down-regulated")
-  )
-
-  g1 <- ggplot(filtRes, aes(reorder(pathway, NES), NES)) +
-    geom_point(aes(fill = Enrichment, size = size), shape = 21) +
-    scale_fill_manual(values = colos) +
-    scale_size_continuous(range = c(2, 10)) +
-    geom_hline(yintercept = 0) +
-    coord_flip() +
-    labs(
-      x = "Pathway", y = "Normalized Enrichment Score",
-      title = header
-    )
-    
-
-  output <- list("Results" = fgRes, "Plot" = g1)
-  return(output)
-}
-```
-
-

@@ -1,0 +1,376 @@
+---
+title: "Extended Data Fig. 5"
+author: "KonstaK"
+date: "4/12/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  cache.lazy = FALSE,
+  echo = FALSE,
+  fig.height = 4,
+  fig.width = 6,
+  fig.asp = 0.618,
+  fig.show = "show",
+  out.width = "70%",
+  fig.align = "center",
+  fig.path = "plots/pngs/"
+)
+
+```
+
+
+```{r libraries}
+library(ComplexHeatmap)
+library(circlize)
+library(ggrepel)
+library(tidyverse)
+
+# Setting ggplot theme
+theme_set(theme_bw() +
+  theme(
+    line = element_line(size = unit(0.5, "points")),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    panel.border = element_blank(),
+    axis.text = element_text(color = "black", size = 8),
+    axis.title = element_text(color = "black", size = 10),
+    axis.line = element_line(size = unit(0.5, "pt")),
+    text = element_text(color = "black"),
+    legend.background = element_rect(color = "black", fill = NA, size = 0.5, linetype = "solid")
+  ))
+
+source("utils/utils.R")
+source("utils/random_regions.R")
+
+tcga_abbr <- read_tsv("annotations/TCGA_ATAC/tcga_study_abbreviations.txt", col_names = c("cancer", "full_cancer_name"))
+# Cancer organ and histology classification:
+tcga_abbr <- tcga_abbr %>%
+  mutate(
+    organ_system_hoadley_2018 = case_when(
+      cancer %in% c("BRCA", "UCEC", "UCS", "OV") ~ "Pan-GYN",
+      cancer %in% c("CESC") ~ "Pan-GYN/squamous",
+      cancer %in% c("BLCA", "HNSC", "LUSC") ~ "Pan-squamous",
+      cancer %in% c("EAC", "GAC", "COAD", "READ", "STAD", "ESCA") ~ "Pan-GI",
+      cancer %in% c("KICH", "KIRC", "KIRP") ~ "Pan-kidney",
+      TRUE~"Unspecified"
+    ),
+    histology_wiznerowicz_2018 = case_when(
+      cancer %in% c("ACC", "BLCA", "LIHC", "MESO", "THCA") ~ "Misc",
+      cancer %in% c("BRCA", "CHOL", "COAD", "ESCA", "LUAD", "OV", "PAAD", "PRAD", "READ", "STAD", "UCEC") ~ "Adenocarcinomas",
+      cancer %in% c("CESC", "HNSC", "LUSC") ~ "Squamous",
+      cancer %in% c("DLBC", "LAML", "THYM") ~ "Ly-Hem",
+      cancer %in% c("GBM", "LGG", "PCPG", "SKCM", "UVM") ~ "Neuronal",
+      cancer %in% c("KICH", "KIRC", "KIRP") ~ "Kidney",
+      cancer %in% c("SARC", "UCS") ~ "Sar",
+      cancer == "TGCT" ~ "SC"
+    )
+  )
+
+```
+
+#### Extended data fig. 5a
+
+```{r extended_data_fig_5a_TCGA_TE_enrichment_heatmap}
+
+# All of the TCGA ATAC peaks downloaded from https://api.gdc.cancer.gov/data/71ccfc55-b428-4a04-bb5a-227f7f3bf91c, with the peak centers as summits
+files <- list.files("data/TCGA_ATAC/summits", full.names = T)
+
+# tcga_atac_shuffled_all <- lapply(seq_along(head(files, 1)), function(i) {
+#   shuffle_random_regions(peak_path = files[i], n = 1000, repeatmasker_gr, cores_n = 60)
+# })
+  
+tcga_atac_shuffled_all <- readRDS("data/shuffled/TCGA_ATAC_shuffled_all.Rds")
+
+tcga_atac_summits <- lapply(files, read_tsv, col_names = narrowpeak_colnames)
+
+tcga_atac_summits_ovl_stat <- lapply(seq_along(tcga_atac_summits), function(i) {
+  
+  ovls <- findOverlaps(GRanges(tcga_atac_summits[[i]]), repeatmasker_gr)
+  
+  counts <- repeatmasker[subjectHits(ovls), ] %>%
+    group_by(subf) %>%
+    dplyr::summarize(n = dplyr::n()) %>%
+    bind_rows(data.frame(subf = "Non_TE", n = queryLength(ovls) - length(queryHits(ovls))))
+  
+  process_binomial_testing(tcga_atac_shuffled_all[[i]], counts, "subf")
+})
+
+```
+
+```{r}
+keep_sig <- bind_rows(tcga_atac_summits_ovl_stat) %>% # Only filtering subfamilies that have significant  enrichment at least in one cancer type
+  group_by(subf, sig) %>% 
+  dplyr::summarize(n = n()) %>% 
+  pivot_wider(names_from = sig, values_from = n) %>% 
+  filter(!is.na(SINE) | !is.na(DNA) | !is.na(LINE) | !is.na(LTR)) %>% 
+  pull(subf)
+
+keep_subf <- bind_rows(tcga_atac_summits_ovl_stat) %>% # Only filtering subfamilies that have at least 10 peak summit overlaps
+  dplyr::select(cancer, subf, n) %>% 
+  pivot_wider(names_from = cancer, values_from = n) %>% 
+  rowwise() %>%
+  mutate(max = max(c_across(2:last_col()))) %>% 
+  filter(max >= 10) %>% 
+  pull(subf)
+
+keep_fin <- intersect(keep_sig, keep_subf)
+
+heatmap_matrix_dat <- bind_rows(tcga_atac_summits_ovl_stat) %>% 
+  dplyr::select(subf, cancer, obs_exp) %>% 
+  # mutate(obs_exp = log2(obs_exp + 1)) %>% 
+  filter(subf %in% keep_fin) %>% 
+  pivot_wider(names_from = cancer, values_from = obs_exp, values_fill = 0) %>% 
+  mutate(across(ACC:last_col(), scale.default)) %>% 
+  column_to_rownames("subf") %>% 
+  as.matrix()
+
+subfamily <- str_extract(rownames(heatmap_matrix_dat), "[^\\|]+")
+family <- str_extract(rownames(heatmap_matrix_dat), "(?<=\\|).+(?=\\|)")
+class <- str_extract(rownames(heatmap_matrix_dat), "DNA$|LTR$|LINE$|SINE$")
+
+rownames(heatmap_matrix_dat) <- subfamily
+
+organ_sys <- tcga_abbr %>% 
+  filter(cancer %in% colnames(heatmap_matrix_dat)) %>% 
+  arrange(cancer) %>%  
+  pull(organ_system_hoadley_2018)
+
+histology <- tcga_abbr %>% 
+  filter(cancer %in% colnames(heatmap_matrix_dat)) %>% 
+  arrange(cancer) %>%  
+  pull(histology_wiznerowicz_2018)
+
+```
+
+```{r plot_heatmap}
+breaks <- seq(min(heatmap_matrix_dat), max(heatmap_matrix_dat), length.out = 9)
+
+organ_sys_pal <- pal_npg("nrc")(5)
+histology_pal <- pal_nejm("default")(6)
+
+row_ha <- rowAnnotation(
+  Class = class,
+  # TE ages (% div) = heatmap_te_lineages,
+  annotation_legend_param = list(nrow = 4),
+  col = list(
+    Class = c("LINE" = col_pal[1], "SINE" = col_pal[2], "LTR" = col_pal[3], "DNA" = col_pal[4])
+    # TE ages (% div) = colorRamp2(seq(0, max(heatmap_matrix_dat), length.out = 9), heat_cols_orrd)
+  )
+)
+
+col_ha <- HeatmapAnnotation(
+  'Organ system' = organ_sys,
+  'Histology' = histology,
+  name = c("Organ system", "Histology"),
+  col = list(
+    'Organ system' = c(
+      "Pan-GI" = organ_sys_pal[1],
+      "Pan-GYN" = organ_sys_pal[2],
+      "Pan-GYN/squamous" = organ_sys_pal[3],
+      "Pan-kidney" = organ_sys_pal[4],
+      "Pan-squamous" = organ_sys_pal[5],
+      "Unspecified" = "white"
+    ),
+    'Histology' = c(
+      "Adenocarcinomas" = histology_pal[1],
+      "Kidney" = histology_pal[2],
+      "Misc" = histology_pal[3],
+      "Neuronal" = histology_pal[4],
+      "SC" = histology_pal[5],
+      "Squamous" = histology_pal[6]
+    )
+  )
+)
+
+htmp <- Heatmap(heatmap_matrix_dat,
+  row_names_max_width = unit(20, "cm"),
+  cluster_row_slices = T,
+  border = F,
+  name = "Z-score (Observed/expected ratio)",
+  col = colorRamp2(breaks, heat_cols_orrd),
+  # rect_gp = gpar(col = "black", lwd = .1),
+
+  # Parameters for the colour-bar that represents gradient of motif enrichment
+  heatmap_legend_param = list(
+    color_bar = "continuous",
+    legend_direction = "horizontal",
+    legend_width = unit(5, "cm"),
+    legend_height = unit(4, "cm"),
+    title_position = "topcenter",
+    title_gp = gpar(fontsize = 8),
+    labels_gp = gpar(fontsize = 6),
+    border = "black",
+    nrow = 4,
+    by_row = T
+  ),
+
+  # Row (TF) parameters
+  cluster_rows = T,
+  show_row_dend = T,
+  clustering_method_rows = "ward.D2",
+  row_title_side = "left",
+  row_title_gp = gpar(fontsize = 8),
+  row_title_rot = 0,
+  show_row_names = T,
+  row_names_gp = gpar(fontsize = 8),
+  row_names_side = "right",
+  row_dend_width = unit(15, "mm"),
+
+  # Column (cluster) parameters
+  cluster_columns = T,
+  clustering_method_columns = "ward.D2",
+  column_title_side = "top",
+  column_title_gp = gpar(fontsize = 8),
+  column_title_rot = 0,
+  column_names_gp = gpar(fontsize = 8),
+  column_names_max_height = unit(10, "cm"),
+  column_names_rot = 0,
+  column_names_centered = T,
+  column_dend_height = unit(25, "mm"),
+  
+  right_annotation = row_ha,
+  top_annotation = col_ha
+)
+
+path <- paste0("plots/", today, "_TCGA_ATAC_TE_enrichment.pdf")
+# pdf(path, width = 12, height = 30)
+draw(htmp, heatmap_legend_side = "bottom")
+# dev.off()
+```
+
+#### Extended data fig. 5b
+
+```{r extended_data_fig_5b_TCGA_GI_TE_enrichment_1}
+# All enriched subfamilies in GP5d and HepG2 from fig. 3a for labeling the figure
+enriched_subfs <- list(
+  HepG2 = c("LTR12_", "LTR12", "LTR12C", "LTR12D", "LTR12F", "MER44B", "MER44C", "MER44D", "MER52A", "MER52C", "MER52D", "LTR10A", "LTR2752", "THE1A", "THE1B", "THE1C", "THE1D", "Tigger7", "LTR1A2"),
+  GP5d = c("HERV17-int", "HERVL-int", "HSMAR2", "L1PA15-16", "L1PB1", "LTR10C", "LTR10F", "LTR14B", "LTR14C", "LTR7B", "LTR7Y", "LTR7", "LTR8", "MER11A", "MER11B", "MER11C", "MER11D", "MER31A")
+)
+
+# How many subfamilies are differentially enriched in total in GP5d
+length(enriched_subfs$GP5d)
+length(enriched_subfs$HepG2)
+
+# Calculating how many TE subfamilies that are common with GP5d are enriched in TCGA ATAC COAD data
+bind_rows(tcga_atac_summits_ovl_stat, .id = "cell_line") %>%
+  filter(cancer %in% c("COAD")) %>% 
+  left_join(., tcga_abbr, by = "cancer") %>% 
+  mutate(cancer = paste0(cancer, "\n", full_cancer_name)) %>% 
+  filter(n >= 5) %>% 
+  mutate(
+    te_name = str_extract(subf, "[^\\|]+"),
+    lab = ifelse(sig != "insig" & te_name %in% enriched_subfs$GP5d, te_name, NA),
+    size = ifelse(sig != "insig" & te_name %in% enriched_subfs$GP5d, 3, ifelse(sig != "insig" & !te_name %in% enriched_subfs$GP5d, 2, 1))) %>% 
+  pull(lab) %>% 
+  na.omit() %>%
+  length()
+
+# Same for HepG2
+bind_rows(tcga_atac_summits_ovl_stat, .id = "cell_line") %>%
+  filter(cancer %in% c("LIHC")) %>% 
+  left_join(., tcga_abbr, by = "cancer") %>% 
+  mutate(cancer = paste0(cancer, "\n", full_cancer_name)) %>% 
+  filter(n >= 5) %>% 
+  mutate(
+    te_name = str_extract(subf, "[^\\|]+"),
+    lab = ifelse(sig != "insig" & te_name %in% enriched_subfs$HepG2, te_name, NA),
+    size = ifelse(sig != "insig" & te_name %in% enriched_subfs$HepG2, 3, ifelse(sig != "insig" & !te_name %in% enriched_subfs$HepG2, 2, 1))) %>% 
+  pull(lab) %>% 
+  na.omit() %>%
+  length()
+```
+
+```{r extended_data_fig_5b_TCGA_GI_TE_enrichment_2}
+
+bind_rows(tcga_atac_summits_ovl_stat, .id = "cell_line") %>%
+  filter(cancer %in% c("COAD")) %>% 
+  left_join(., tcga_abbr, by = "cancer") %>% 
+  mutate(cancer = paste0(cancer, "\n", full_cancer_name)) %>% 
+  filter(n >= 5) %>% 
+  # mutate(lab = ifelse(sig != "insig" & str_starts(subf, "MER11[ABCD]"), str_extract(subf, "[^\\|]+"), NA)) %>% 
+  mutate(
+    te_name = str_extract(subf, "[^\\|]+"),
+    lab = ifelse(sig != "insig" & te_name %in% enriched_subfs$GP5d, te_name, NA),
+    size = ifelse(sig != "insig" & te_name %in% enriched_subfs$GP5d, 3, ifelse(sig != "insig" & !te_name %in% enriched_subfs$GP5d, 2, 1))) %>% 
+  ggplot(aes(x = obs_exp, y = -log10(p_adj), fill = factor(sig), size = factor(size), label = lab)) +
+  geom_point(shape = 21) +
+  # geom_abline(linetype = "dashed", color = "gray70", alpha = .7) +
+  facet_wrap(~cancer, scales = "free") +
+  labs(
+    x = "log2(ATAC peak observed/expected ratio + 1)",
+    y = "FDR (-log10)"
+  ) +
+  scale_fill_manual(values = col_pal, name = "TE class", limits = c("LINE", "SINE", "LTR", "DNA")) +
+  scale_size_manual(values = c(.3, .5, 2.5), guide = "none") +
+  geom_text_repel(size = 2.5, min.segment.length = .1, max.iter = 10e8, max.overlaps = 1000) +
+  geom_hline(yintercept = -log10(0.01), linetype = "dashed", color = "gray70", alpha = .7) +
+  # scale_x_log10(breaks = c(0, 1, 10, 100), expand = c(0, 0), limits = c(.5, 250)) +
+  # scale_y_log10(breaks = c(0, 1, 10, 100), expand = c(0, 0), limits = c(.5, 250)) +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_TCGA_ATAC_COAD_TE_enrichment_scatterplot.pdf")
+# ggsave(path, width = 10, height = 3)
+
+bind_rows(tcga_atac_summits_ovl_stat, .id = "cell_line") %>%
+  filter(cancer %in% c("LIHC")) %>% 
+  left_join(., tcga_abbr, by = "cancer") %>% 
+  mutate(cancer = paste0(cancer, "\n", full_cancer_name)) %>% 
+  filter(n >= 5) %>% 
+  # mutate(lab = ifelse(sig != "insig" & str_starts(subf, "MER11[ABCD]"), str_extract(subf, "[^\\|]+"), NA)) %>% 
+  mutate(
+    te_name = str_extract(subf, "[^\\|]+"),
+    lab = ifelse(sig != "insig" & te_name %in% enriched_subfs$HepG2, te_name, NA),
+    size = ifelse(sig != "insig" & te_name %in% enriched_subfs$HepG2, 3, ifelse(sig != "insig" & !te_name %in% enriched_subfs$HepG2, 2, 1))) %>% 
+  ggplot(aes(x = obs_exp, y = -log10(p_adj), fill = factor(sig), size = factor(size), label = lab)) +
+  geom_point(shape = 21) +
+  # geom_abline(linetype = "dashed", color = "gray70", alpha = .7) +
+  facet_wrap(~cancer, scales = "free") +
+  labs(
+    x = "log2(ATAC peak observed/expected ratio + 1)",
+    y = "FDR (-log10)"
+  ) +
+  scale_fill_manual(values = col_pal, name = "TE class", limits = c("LINE", "SINE", "LTR", "DNA")) +
+  scale_size_manual(values = c(.3, .5, 2.5), guide = "none") +
+  geom_text_repel(size = 2.5, min.segment.length = .1, max.iter = 10e8, max.overlaps = 1000) +
+  geom_hline(yintercept = -log10(0.01), linetype = "dashed", color = "gray70", alpha = .7) +
+  # scale_x_log10(breaks = c(0, 1, 10, 100), expand = c(0, 0), limits = c(.5, 250)) +
+  # scale_y_log10(breaks = c(0, 1, 10, 100), expand = c(0, 0), limits = c(.5, 250)) +
+  theme(legend.position = "none")
+
+path <- paste0("plots/", today, "_TCGA_ATAC_LIHC_TE_enrichment_scatterplot.pdf")
+# ggsave(path, width = 10, height = 3)
+```
+
+#### Extended data fig. 5c
+
+```{r extended_data_fig_5c_pca_plots}
+heatmap_matrix_dat_pc <- prcomp(t(heatmap_matrix_dat)) # Taking PCs of the TE enrichment observed/expected values
+
+heatmap_matrix_dat_pc$x %>% 
+  as_tibble(rownames = "cancer") %>% 
+  dplyr::select(cancer, PC1, PC2) %>% 
+  left_join(., tcga_abbr, by = "cancer") %>% 
+  dplyr::rename(organ_system = organ_system_hoadley_2018) %>% 
+  ggplot(aes(x = PC1, y = PC2, fill = organ_system, label = cancer)) +
+  geom_point(shape = 21, size = 3) +
+  geom_text_repel() +
+  scale_fill_manual(values = c(organ_sys_pal, "white"))
+  
+heatmap_matrix_dat_pc$x %>% 
+  as_tibble(rownames = "cancer") %>% 
+  dplyr::select(cancer, PC1, PC2) %>% 
+  left_join(., tcga_abbr, by = "cancer") %>% 
+  ggplot(aes(x = PC1, y = PC2, fill = histology, label = cancer)) +
+  geom_point(shape = 21, size = 3) +
+  geom_text_repel() +
+  scale_fill_manual(values = histology_pal)
+
+# ggsave(paste0("plots/", today, "_TCGA_ATAC_PCA_by_organ_system.pdf"), width = 5.5, height = 3)
+# ggsave(paste0("plots/", today, "_TCGA_ATAC_PCA_by_histology.pdf"), width = 5.5, height = 3)
+```

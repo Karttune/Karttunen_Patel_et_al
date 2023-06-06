@@ -8,6 +8,8 @@ deeptools_mat_scaled <- scale(deeptools_mat)
 clusters <- 2:9
 cores <- 40
 
+read.table("/data/kzkarttu/gradu/scripts/R_scripts/gradu/data/deeptools/220914_deeptools_GP5D_WT_STARR_peaks_histone_modifications_normalized_matrix.out", skip = 2, header = T)
+
 # Using mclapply to parallerize the kmeans cluster calculations to n cores:  
 kmeans_clusters <- mclapply(seq_along(clusters), mc.cores = cores, function(i) {
   kmeans(deeptools_mat_scaled, clusters[i], nstart = 50, iter.max = 15)

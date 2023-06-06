@@ -61,20 +61,22 @@ gp5d_hepg2_starr_peaks <- list(
 gp5d_hepg2_starr_peaks_gr <- lapply(gp5d_hepg2_starr_peaks, GRanges)
 
 # Reading STARR-seq peak summits for GP5d and HepG2
-gp5d_hepg2_starr_summit_files <- c("data/bed/220803_GP5D_STARR_WT_summits_blacklisted_canonical_chrs.bed", "data/bed/220803_HepG2_STARR_summits_blacklisted_canonical_chrs.bed")
+gp5d_hepg2_rpe1_starr_summit_files <- c("data/bed/220803_GP5D_STARR_WT_summits_blacklisted_canonical_chrs.bed",
+                                        "data/bed/220803_HepG2_STARR_summits_blacklisted_canonical_chrs.bed",
+                                        "data/bed/230224_RPE1_summits_blacklisted_canonical_chrs.bed")
 
-gp5d_hepg2_starr_summits <- list(
-  gp5d = read_tsv(gp5d_hepg2_starr_summit_files[1], col_names = narrowpeak_colnames),
-  hepg2 = read_tsv(gp5d_hepg2_starr_summit_files[2], col_names = narrowpeak_colnames)
+gp5d_hepg2_rpe1_starr_summits <- list(
+  gp5d = read_tsv(gp5d_hepg2_rpe1_starr_summit_files[1], col_names = narrowpeak_colnames),
+  hepg2 = read_tsv(gp5d_hepg2_rpe1_starr_summit_files[2], col_names = narrowpeak_colnames),
+  rpe1 = read_tsv(gp5d_hepg2_rpe1_starr_summit_files[3], col_names = narrowpeak_colnames)
 )
 
-gp5d_hepg2_starr_summits_gr <- lapply(gp5d_hepg2_starr_summits, GRanges)
+gp5d_hepg2_rpe1_starr_summits_gr <- lapply(gp5d_hepg2_rpe1_starr_summits, GRanges)
 ```
 
 #### Fig. 1b
 
 ```{r 1b_upset_plot}
-
 fit <- c(
   "GP5D" = length(subsetByOverlaps(subsetByOverlaps(gp5d_hepg2_starr_peaks_gr$gp5d, gp5d_hepg2_starr_peaks_gr$hepg2, invert = T), repeatmasker_gr, invert = T)),
   "HepG2" = length(subsetByOverlaps(subsetByOverlaps(gp5d_hepg2_starr_peaks_gr$hepg2, gp5d_hepg2_starr_peaks_gr$gp5d, invert = T), repeatmasker_gr, invert = T)),
@@ -95,29 +97,34 @@ upset(fromExpression(fit), order.by = "freq", line.size = 1, point.size = 2.5, t
 ```{r 1c_heatmap}
 shuf_n <- 1000 # Setting the number of shuffles, set at or so 10 for quick run of the report, 1000 shuffles is what is used for final figures
 
-gp5d_hepg2_starr_class_shuf <- list(
-  gp5d = shuffle_random_regions(gp5d_hepg2_starr_summit_files[1], shuf_n, repeatmasker_gr, level = "class"),
-  hepg2 = shuffle_random_regions(gp5d_hepg2_starr_summit_files[2], shuf_n, repeatmasker_gr, level = "class")
-)
+# gp5d_hepg2_rpe1_starr_class_shuf <- list(
+#   gp5d = shuffle_random_regions(gp5d_hepg2_rpe1_starr_summit_files[1], shuf_n, repeatmasker_gr, level = "class"),
+#   hepg2 = shuffle_random_regions(gp5d_hepg2_rpe1_starr_summit_files[2], shuf_n, repeatmasker_gr, level = "class"),
+#   rpe1 = shuffle_random_regions(gp5d_hepg2_rpe1_starr_summit_files[3], shuf_n, repeatmasker_gr, level = "class")
+# )
+# write_tsv(bind_rows(gp5d_hepg2_starr_class_shuf, .id = "line"), "data/shuffled/GP5d_HepG2_RPE1_TE_class_shuffled.tsv")
 
-gp5d_hepg2_starr_class_ovl <- list(
-  gp5d = findOverlaps(gp5d_hepg2_starr_summits_gr$gp5d, repeatmasker_gr),
-  hepg2 = findOverlaps(gp5d_hepg2_starr_summits_gr$hepg2, repeatmasker_gr)
-)
+gp5d_hepg2_rpe1_starr_class_shuf <- read_tsv("data/shuffled/GP5d_HepG2_RPE1_TE_class_shuffled.tsv") %>% 
+  mutate(line = factor(line, levels = c("gp5d", "hepg2", "rpe1"))) %>% 
+  group_by(line) %>% 
+  group_split()
 
-gp5d_hepg2_starr_class_ovl_counts <- lapply(seq_along(gp5d_hepg2_starr_class_ovl), function(i) {
-  repeatmasker[subjectHits(gp5d_hepg2_starr_class_ovl[[i]]), ] %>%
+gp5d_hepg2_rpe1_starr_class_ovl_stat <- lapply(seq_along(gp5d_hepg2_rpe1_starr_summits), function(i) {
+  
+  ovls <- findOverlaps(gp5d_hepg2_rpe1_starr_summits_gr[[i]], repeatmasker_gr)
+  
+  counts <- repeatmasker[subjectHits(ovls), ] %>%
     group_by(class) %>%
     dplyr::summarize(n = dplyr::n()) %>%
-    bind_rows(data.frame(class = "Non_TE", n = queryLength(gp5d_hepg2_starr_class_ovl[[i]]) - length(unique(queryHits(gp5d_hepg2_starr_class_ovl[[i]])))))
+    bind_rows(data.frame(class = "Non_TE", n = queryLength(ovls) - length(unique(queryHits(ovls)))))
+  
+  process_binomial_testing(gp5d_hepg2_rpe1_starr_class_shuf[[i]], counts, "class")
 })
 
-gp5d_hepg2_starr_class_ovl_stat <- list(
-  gp5d = process_binomial_testing(gp5d_hepg2_starr_class_shuf$gp5d, gp5d_hepg2_starr_class_ovl_counts[[1]], "class"),
-  hepg2 = process_binomial_testing(gp5d_hepg2_starr_class_shuf$hepg2, gp5d_hepg2_starr_class_ovl_counts[[2]], "class")
-)
+names(gp5d_hepg2_rpe1_starr_class_ovl_stat) <- c("gp5d", "hepg2", "rpe1")
 
-bind_rows(gp5d_hepg2_starr_class_ovl_stat, .id = "line") %>%
+bind_rows(gp5d_hepg2_rpe1_starr_class_ovl_stat, .id = "line") %>%
+  filter(line != "rpe1") %>% 
   drop_na() %>%
   mutate(
     line = factor(line, levels = c("hepg2", "gp5d"), labels = c("HepG2", "GP5d")),
@@ -150,32 +157,37 @@ rmsk_gr_lineage <- repeatmasker %>%
   mutate(lineage = str_remove_all(str_replace_all(lineage, " ", ""), "\\/[:graph:]+$|\\+[:graph:]+$|\\d+\\_")) %>%
   GRanges()
 
-gp5d_hepg2_starr_lineage_shuf <- list(
-  gp5d = shuffle_random_regions(gp5d_hepg2_starr_summit_files[1], shuf_n, rmsk_gr_lineage, level = "lineage"),
-  hepg2 = shuffle_random_regions(gp5d_hepg2_starr_summit_files[2], shuf_n, rmsk_gr_lineage, level = "lineage")
-)
+# gp5d_hepg2_rpe1_starr_lineage_shuf <- list(
+#   gp5d = shuffle_random_regions(gp5d_hepg2_rpe1_starr_summit_files[1], shuf_n, rmsk_gr_lineage, level = "lineage"),
+#   hepg2 = shuffle_random_regions(gp5d_hepg2_rpe1_starr_summit_files[2], shuf_n, rmsk_gr_lineage, level = "lineage"),
+#   rpe1 = shuffle_random_regions(gp5d_hepg2_rpe1_starr_summit_files[3], shuf_n, rmsk_gr_lineage, level = "lineage")
+# )
+# write_tsv(bind_rows(gp5d_hepg2_rpe1_starr_lineage_shuf, .id = "line"), "data/shuffled/GP5d_HepG2_TE_lineage_shuffled.tsv")
 
-gp5d_hepg2_starr_lineage_te_ovl <- list(
-  gp5d = findOverlaps(GRanges(gp5d_hepg2_starr_summits$gp5d), repeatmasker_gr),
-  hepg2 = findOverlaps(GRanges(gp5d_hepg2_starr_summits$hepg2), repeatmasker_gr)
-)
+gp5d_hepg2_rpe1_starr_lineage_shuf <- read_tsv("data/shuffled/GP5d_HepG2_TE_lineage_shuffled.tsv") %>% 
+  mutate(line = factor(line, levels = c("gp5d", "hepg2", "rpe1"))) %>% 
+  group_by(line) %>% 
+  group_split()
 
-gp5d_hepg2_starr_lineage_te_ovl_counts <- lapply(seq_along(gp5d_hepg2_starr_lineage_te_ovl), function(i) {
-  rmsk_gr_lineage[subjectHits(gp5d_hepg2_starr_lineage_te_ovl[[i]]), ] %>%
+gp5d_hepg2_rpe1_starr_lineage_te_ovl_stat <- lapply(seq_along(gp5d_hepg2_rpe1_starr_summit_files), function(i) {
+  
+  ovls <- findOverlaps(gp5d_hepg2_rpe1_starr_summits_gr[[i]], repeatmasker_gr)
+  
+  counts <- rmsk_gr_lineage[subjectHits(ovls), ] %>%
     as_tibble() %>%
     group_by(lineage) %>%
     dplyr::summarize(n = dplyr::n()) %>%
-    bind_rows(data.frame(lineage = "Non_TE", n = queryLength(gp5d_hepg2_starr_lineage_te_ovl[[i]]) - length(queryHits(gp5d_hepg2_starr_lineage_te_ovl[[i]]))))
+    bind_rows(data.frame(lineage = "Non_TE", n = queryLength(ovls) - length(queryHits(ovls))))
+  
+  process_binomial_testing(gp5d_hepg2_rpe1_starr_lineage_shuf[[1]], counts, "lineage")
 })
 
-gp5d_hepg2_starr_lineage_te_ovl_stat <- list(
-  gp5d = process_binomial_testing(gp5d_hepg2_starr_lineage_shuf[[1]], gp5d_hepg2_starr_lineage_te_ovl_counts[[1]], "lineage"),
-  hepg2 = process_binomial_testing(gp5d_hepg2_starr_lineage_shuf[[2]], gp5d_hepg2_starr_lineage_te_ovl_counts[[2]], "lineage")
-)
+names(gp5d_hepg2_rpe1_starr_lineage_te_ovl_stat) <- c("gp5d", "hepg2", "rpe1")
 
-bind_rows(gp5d_hepg2_starr_lineage_te_ovl_stat, .id = "line") %>%
+bind_rows(gp5d_hepg2_rpe1_starr_lineage_te_ovl_stat, .id = "line") %>%
+  filter(line != "rpe1") %>% 
   filter(lineage != "Non_TE") %>%
-  mutate(sig = ifelse(p_adj < 0.05, "sig", "insig")) %>%
+  mutate(sig = ifelse(p_adj < 0.01, "sig", "insig")) %>%
   dplyr::select(line, obs_exp, sig, lineage) %>%
   pivot_wider(names_from = line, values_from = obs_exp, values_fill = 0) %>%
   ggplot(aes(x = gp5d, y = hepg2, fill = sig, size = sig, label = lineage)) +
@@ -200,30 +212,134 @@ path <- paste0("plots/", today, "_GP5D_HepG2_TE_lineage_enrichment_scatterplot.p
 # ggsave(path, width = 4, height = 5)
 ```
 
-#### Extended data fig. 1
+#### !OLD! Extended data fig. 1a !OLD! 
 
 ```{r extended_fig1_TE_overlap_percentage_barplot}
-gp5d_starr_summits_te_ovl <- findOverlaps(gp5d_hepg2_starr_summits_gr$gp5d, repeatmasker_gr)
+# gp5d_starr_summits_te_ovl <- findOverlaps(gp5d_hepg2_starr_summits_gr$gp5d, repeatmasker_gr)
+# 
+# ovls <- lapply(gp5d_hepg2_starr_summits_gr, findOverlaps, subject = repeatmasker_gr)
+# 
+# repeatmasker[subjectHits(ovls[[1]]), ]
+# gp5d_hepg2_starr_summits[[2]][subjectHits(ovls[[2]]), ]
+# 
+# bind_rows(
+#   repeatmasker[subjectHits(gp5d_starr_summits_te_ovl), ] %>% mutate(line = "GP5d"),
+#   repeatmasker %>% mutate(line = "Genome")
+# ) %>%
+#   group_by(te_name, line, class) %>%
+#   dplyr::summarize(n = n()) %>%
+#   pivot_wider(names_from = line, values_from = n, values_fill = 0) %>%
+#   filter(GP5d >= 5) %>%
+#   mutate(
+#     gp5d_percentage = (GP5d / Genome) * 100,
+#   ) %>%
+#   ungroup() %>%
+#   arrange(desc(gp5d_percentage)) %>%
+#   dplyr::slice(1:50) %>%
+#   ggplot(aes(x = gp5d_percentage, y = fct_reorder(te_name, gp5d_percentage), fill = class)) +
+#   geom_bar(position = "dodge", stat = "identity") +
+#   scale_fill_manual(values = col_pal, name = "TE class", limits = c("LINE", "SINE", "LTR", "DNA")) +
+#   labs(x = "% of all genomic copies of a TE subfamily\noverlapping a STARR-seq peak summit", y = "")
+# 
+# path <- paste0("plots/", today, "GP5d_TE_enrichment_percentage_barplot.pdf")
+# ggsave(path, width = 8, height = 5)
+```
 
-bind_rows(
-  repeatmasker[subjectHits(gp5d_starr_summits_te_ovl), ] %>% mutate(line = "GP5d"),
-  repeatmasker %>% mutate(line = "Genome")
-) %>%
+#### Extended data fig. 1a
+
+```{r extended_data_fig_1a_TE_overlap_percentage_barplot}
+# Reading STARR-seq peak summits for GP5d and HepG2
+starr_summits_te_ovl <- lapply(gp5d_hepg2_rpe1_starr_summits_gr, findOverlaps, subject = repeatmasker_gr)
+
+bind_rows(lapply(seq_along(starr_summits_te_ovl), function(i) {
+  repeatmasker[subjectHits(starr_summits_te_ovl[[i]]), ] %>%
+    mutate(line = names(gp5d_hepg2_rpe1_starr_summits)[i])
+})) %>%
+  bind_rows(., repeatmasker %>% mutate(line = "Genome")) %>%
   group_by(te_name, line, class) %>%
   dplyr::summarize(n = n()) %>%
   pivot_wider(names_from = line, values_from = n, values_fill = 0) %>%
-  filter(GP5d >= 5) %>%
-  mutate(
-    gp5d_percentage = (GP5d / Genome) * 100,
-  ) %>%
   ungroup() %>%
-  arrange(desc(gp5d_percentage)) %>%
-  dplyr::slice(1:50) %>%
-  ggplot(aes(x = gp5d_percentage, y = fct_reorder(te_name, gp5d_percentage), fill = class)) +
-  geom_bar(position = "dodge", stat = "identity") +
-  scale_fill_manual(values = col_pal, name = "TE class", limits = c("LINE", "SINE", "LTR", "DNA")) +
-  labs(x = "% of all genomic copies of a TE subfamily\noverlapping a STARR-seq peak summit", y = "")
+  filter(Genome > 10) %>% # Taking subfamilies that have more than 5 insertions
+  mutate(
+    gp5d_percentage = (gp5d / Genome) * 100, # Calculating the percentage of copies in a subfamily overlapping a STARR summit
+    hepg2_percentage = (hepg2 / Genome) * 100,
+    rpe1_percentage = (rpe1 / Genome) * 100,
+  ) %>%
+  rowwise() %>%
+  mutate(row_mean = sum(gp5d_percentage, hepg2_percentage, rpe1_percentage) / 3) %>%
+  ungroup() %>%
+  arrange(desc(row_mean)) %>%
+  slice_head(n = 40) %>%
+  pivot_longer(cols = gp5d_percentage:rpe1_percentage) %>% 
+  mutate(name = str_remove(name, "_percentage")) %>% 
+  ggplot(aes(x = fct_reorder(te_name, row_mean), y = value, fill = name)) +
+  geom_bar(position = position_dodge(), stat = "identity") +
+  # scale_fill_manual(values = col_pal, name = "TE class", limits = c("LINE", "SINE", "LTR", "DNA")) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(y = "% of all genomic copies of a TE subfamily\noverlapping a STARR-seq peak summit") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title.x = element_blank()
+  ) +
+  scale_fill_manual(values = c("#E64B35", "#0072B5", "#6F99AD"))
 
-path <- paste0("plots/", today, "GP5d_TE_enrichment_percentage_barplot.pdf")
-# ggsave(path, width = 8, height = 5)
+path <- paste0("plots/", today, "_GP5d_HepG2_RPE1_TE_enrichment_percentage_barplot.pdf")
+# ggsave(path, width = 9, height = 5)
+```
+
+#### Extended data fig. 1b
+
+```{r extended_data_fig_1b_te_class_enrichment}
+
+bind_rows(gp5d_hepg2_rpe1_starr_class_ovl_stat, .id = "line") %>%
+  drop_na() %>%
+  mutate(
+    line = factor(line, levels = c("rpe1", "hepg2", "gp5d"), labels = c("RPE1", "HepG2", "GP5d")),
+    class = factor(class, levels = c("DNA", "LINE", "LTR", "SINE", "Non_TE"))
+  ) %>%
+  ggplot(aes(x = class, y = line, fill = obs_exp, label = sym)) +
+  geom_tile() +
+  geom_label() +
+  scale_fill_gradient2(low = heat_cols_red[1], mid = heat_cols_red[2], high = heat_cols_red[3], limits = c(-.5, 3.5), midpoint = 1, name = "Observed/expected\nratio") +
+  theme(
+    axis.title = element_blank(),
+    legend.position = "bottom"
+  ) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0))
+
+path <- paste0("plots/", today, "_GP5D_HepG2_RPE1_TE_class_OE_ratio_heatmap.pdf")
+# ggsave(path, width = 4, height = 3)
+```
+
+#### Extended data fig. 1c
+
+```{r extended_data_fig_1c_te_ages}
+# TE age data from Kapusta et al. 2013
+
+bind_rows(gp5d_hepg2_rpe1_starr_lineage_te_ovl_stat, .id = "line") %>% 
+  filter(lineage != "Non_TE") %>%
+  mutate(sym = case_when(
+      p_adj <= 0.0001 ~ "****",
+      p_adj > 0.0001 & p_adj <= 0.001 ~ "***",
+      p_adj > 0.001 & p_adj <= 0.01 ~ "**",
+      p_adj > 0.01 & p_adj <= 0.05 ~ "*",
+      p_adj > 0.05 ~ "ns"
+    )) %>%  
+  dplyr::select(line, obs_exp, sym, lineage) %>%
+  mutate(
+    lineage = factor(lineage, levels = c("Human", "Catarrhini", "Haplorrhini", "Hominidae", "Hominoidea", "Simiiformes", "Euarchontoglires", "Primates", "Boreotheria", "Eutheria", "Theria", "Mammalia", "Amniota", "Tetrapoda"))) %>% 
+  na.omit() %>% 
+  ggplot(aes(x = lineage, y = obs_exp, fill = line, label = sym)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_text(position = position_dodge(0.9)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Lineage", y = "Observed/expected ratio") +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray40") +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_fill_manual(values = c("#E64B35", "#0072B5", "#6F99AD"))
+
+path <- paste0("plots/", today, "_GP5D_HepG2_RPE1_TE_lineage_enrichment_barplot.pdf")
+# ggsave(path, width = 6, height = 4.5)
 ```
