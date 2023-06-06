@@ -349,7 +349,6 @@ starr_summits_te_ovl <- list(
   c2 = findOverlaps(GRanges(gp5d_starr_summits$c2), repeatmasker_gr)
 )
 
-read_tsv("data/shuffled/GP5d_WT_GP5d_p53_null_TE_subfamily_shuffled.tsv") 
 starr_summits_shuf <- read_tsv("data/shuffled/GP5d_WT_GP5d_p53_null_TE_subfamily_shuffled.tsv") %>% 
   group_by(factor(line, levels = c("wt", "c2"))) %>% 
   group_split(.keep = T)
