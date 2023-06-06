@@ -1,4 +1,4 @@
-# Karttunen, Patel et al. scripts
+# Karttunen & Patel et al. scripts
 
 This is a repository of the source R code for the preprint:
 
@@ -95,6 +95,16 @@ bsseq 1.28.0
 ggpubr 0.4.0
 
 Rsubread 2.6.4
+
+## Extended Data Fig. 5
+
+This is a separate script for creating the figures in Extended Data Fig. 5. The cancer-specific TCGA ATAC peak data for the 23 cancer types were downloaded from https://gdc.cancer.gov/about-data/publications/ATACseq-AWG.
+
+#### Required additional packages for Extended_data_fig_5.rmd:
+
+circlize 0.4.15
+
+ComplexHeatmap 2.8.0
 
 ## Figure 6.
 Fig_6.rmd contains the R code to reproduce fig. 6a, b, Extended data fig. 7a, b, and c.
